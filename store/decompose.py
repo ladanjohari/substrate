@@ -69,12 +69,14 @@ def api(path, payload=None):
 def think(goal_sentence):
     out = subprocess.run(
         ["claude", "-p", PROMPT.format(goal=goal_sentence), "--model", "sonnet"],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
     )
     if out.returncode != 0 or "Failed to authenticate" in out.stdout:
         # The CLI prints a login failure on stdout with a zero exit code, so
         # check both, and say what to do rather than showing an empty error.
-        why = (out.stderr or out.stdout).strip()[:400]
+        why = out.stdout.strip() if "Failed to authenticate" in out.stdout else \
+            (out.stderr or out.stdout).strip()
+        why = why[:400]
         sys.exit("the claude command could not run: " + (why or "no output")
                  + "\n  if it says authenticate: open a terminal, run `claude`, log in, try again")
     m = re.search(r"\{.*\}", out.stdout, re.DOTALL)
