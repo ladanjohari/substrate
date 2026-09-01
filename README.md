@@ -42,8 +42,10 @@ A goal's id is a short slug. A task's id is `goal/slug`. Inside a goal you can
 use the short name anywhere a task is expected. Add `--json` before any command
 for machine-readable output.
 
-Also there: `frontier` (what may start right now), `show`, `criteria`,
-`add-criterion`, `state`, `log`. Run `./bin/substrate -h` for the full list.
+Also there: `decompose "a goal in one sentence"` (a proposed tree with criteria,
+one call to the `claude` command, arrives waiting for approval), `approve <goal>`,
+`frontier` (what may start right now), `show`, `criteria`, `add-criterion`,
+`state`, `log`. Run `./bin/substrate -h` for the full list.
 
 ## Sixty seconds, end to end
 
