@@ -71,8 +71,12 @@ def think(goal_sentence):
         ["claude", "-p", PROMPT.format(goal=goal_sentence), "--model", "sonnet"],
         capture_output=True, text=True, timeout=300,
     )
-    if out.returncode != 0:
-        sys.exit("claude CLI failed: " + out.stderr[:400])
+    if out.returncode != 0 or "Failed to authenticate" in out.stdout:
+        # The CLI prints a login failure on stdout with a zero exit code, so
+        # check both, and say what to do rather than showing an empty error.
+        why = (out.stderr or out.stdout).strip()[:400]
+        sys.exit("the claude command could not run: " + (why or "no output")
+                 + "\n  if it says authenticate: open a terminal, run `claude`, log in, try again")
     m = re.search(r"\{.*\}", out.stdout, re.DOTALL)
     if not m:
         sys.exit("no JSON in model output:\n" + out.stdout[:400])

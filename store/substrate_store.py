@@ -7,14 +7,14 @@ edges, log) behind a tiny local HTTP service. Agents and humans write state
 changes through it; displays read from it. No cloud, no AI, this layer only
 remembers.
 
-Data model v1 (see DATA-MODEL.md):
+Data model v1 (process/data-model-v1.html):
   node:  intent, exit criterion, state, owner, children (via parent)
   edges: blocked_by (the DAG)
   log:   append-only events, evidence attached; node state is derived
          convenience, the log is the truth
 
 Run:   python3 substrate_store.py serve [port]     (default 8040)
-Seed:  python3 substrate_store.py seed             (loads plan v1, idempotent)
+Seed:  python3 substrate_store.py seed             (loads the example plan, idempotent)
 
 API:
   GET  /tree            the full graph: nodes, edges, latest state + criteria
@@ -671,8 +671,10 @@ if __name__ == "__main__":
     if cmd == "seed":
         seed()
     elif cmd == "serve":
+        # Serving no longer loads the example plan. A new database starts
+        # empty; `seed` loads the example on purpose.
         port = int(sys.argv[2]) if len(sys.argv) > 2 else 8040
-        seed()
+        db()
         print(f"substrate store serving on http://localhost:{port}  (db: {DB_PATH})")
         HTTPServer(("127.0.0.1", port), Handler).serve_forever()
     else:
