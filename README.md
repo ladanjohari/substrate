@@ -20,11 +20,26 @@ Python 3.10 or newer. No packages to install.
 ```
 git clone <this repo> substrate
 cd substrate
-./bin/substrate tree
+./bin/substrate
 ```
+
+To type `substrate` from any folder, add its `bin` to your PATH, for example
+in `~/.zshrc`: `export PATH="$HOME/substrate/bin:$PATH"`.
 
 The first run creates an empty database at `store/substrate.db`. To keep more
 than one, point `SUBSTRATE_DB` at another file.
+
+## From a sentence to a tree
+
+```
+substrate decompose
+Your goal, in one sentence: Plan and host a small dinner for eight friends next month
+```
+
+Half a minute later the proposed tree is on screen: tasks, what waits on what,
+three checkable criteria per task, and the goal in `waiting`. Nothing runs
+until `substrate approve <goal>`. This step calls the `claude` command once,
+so that command has to be installed and logged in.
 
 ## The seven commands
 
