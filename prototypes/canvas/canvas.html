@@ -86,7 +86,7 @@ svg text{font-family:inherit;user-select:none;-webkit-user-select:none;}
 <script>
 const STORE='http://localhost:8040';
 let DATA=null, SNAP='', currentGoal=null, sel=[], mergeMode=false;
-window.ACTOR='ladan';
+window.ACTOR='human';
 let cam={x:0,y:0,k:1};
 let vw=innerWidth, vh=innerHeight-44; // 44 = the bar across the top
 
@@ -297,7 +297,7 @@ function showSculpt(){
        </div>`;
   }else{
     document.getElementById('sb-title').textContent=t.title;
-    const human=/approved by|chosen by|marked as chosen|decides|decision required|sign.?off|human decision|ladan (approves|decides|picks|chooses)/i.test(t.exit_criterion+' '+t.intent);
+    const human=/approved by|chosen by|marked as chosen|decides|decision required|sign.?off|human decision|\w+ (approves|decides|picks|chooses)/i.test(t.exit_criterion+' '+t.intent);
     const runnable=t.state==='idle'&&!human;
     document.getElementById('sb-body').innerHTML=
       `<div style="font-size:11px;color:var(--text-3);margin-bottom:8px;">${esc(t.state)}${human?' &middot; needs a human, no AI run':''}</div>

@@ -71,7 +71,7 @@ it at a glance, as a tree, or as the one question that needs them. Git for goals
 
 ### Spoken, 60 seconds
 
-> I'm Ladan. I'm a design engineer, and I build Substrate.
+> I'm a design engineer, and I build Substrate.
 >
 > Here's the problem I kept hitting. AI agents can run for hours now, in
 > parallel, but the plan they're working on has nowhere to live. The goal is
@@ -102,7 +102,7 @@ takes, keep the one that sounds like you rather than the perfect one.
 
 ## Who it is for
 
-1. **Developers running parallel agent sessions.** The wedge. Ladan is user
+1. **Developers running parallel agent sessions.** The wedge. The author is user
    zero: resume any session against the same goal tree.
 2. **Small mixed human and agent teams.** The shared tree is the coordination
    surface.
@@ -167,7 +167,7 @@ whole thing gets filed under "artist."
 **"Who pays?"** Developers running parallel sessions, then small mixed teams
 where the shared tree is the coordination surface. Seat or usage based.
 *Still thin:* zero paying users today. One crisp sentence on who the first ten
-paying teams are, and one real user who is not Ladan, closes this.
+paying teams are, and one real user who is not the author, closes this.
 
 **"Why you, and why solo?"** She is user zero and lives the problem daily. She
 built the working prototype and, more to the point, the interaction grammar that
@@ -288,7 +288,7 @@ video, v0.2, and demand validation all live in the store.
 1. **Show criteria in the tree.** The state exists in the model but the displays
    still render one status per task. This is a design decision, not a build one:
    how does a task that is three-quarters checked look at each altitude?
-2. **Get one developer who is not Ladan to run it.** Closes the traction gap and
+2. **Get one developer who is not the author to run it.** Closes the traction gap and
    the "is the five-minute claim true" gap at once.
 3. **Sharpen the "most impressive thing" line.** It carries the whole personal
    case in any application or intro.

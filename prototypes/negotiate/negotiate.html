@@ -265,19 +265,19 @@ async function keepNode(){
   const t=tasksOf(currentGoal).find(x=>x.id===selected);
   const ta=document.getElementById('exit-ta');
   if(ta && ta.value.trim() && ta.value.trim()!==t.exit_criterion){
-    await api('/node/update',{node:selected,actor:'ladan',fields:{exit_criterion:ta.value.trim()}});
+    await api('/node/update',{node:selected,actor:'human',fields:{exit_criterion:ta.value.trim()}});
   }
   kept[selected]=true; selected=null;
   await refresh(true);
 }
 async function removeNode(){
-  await api('/node/remove',{node:selected,actor:'ladan'});
+  await api('/node/remove',{node:selected,actor:'human'});
   delete kept[selected]; selected=null;
   await refresh(true);
 }
 async function approve(){
   const g=currentGoal;
-  await api('/event',{node:g,to:'working',actor:'ladan',note:'negotiated and approved on the sculpt surface; plan armed, frontier open'});
+  await api('/event',{node:g,to:'working',actor:'human',note:'negotiated and approved on the sculpt surface; plan armed, frontier open'});
   justArmed=true; kept={}; selected=null; currentGoal=null;
   await refresh(true);
 }

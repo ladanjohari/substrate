@@ -62,7 +62,7 @@ Set `SUBSTRATE_ACTOR` so the log records who you are, e.g. `claude-session-3`.
 
 - **Never mark a criterion met on your own promise.** If the evidence would be
   "I wrote the code", the criterion is unmet until something ran.
-- **Never mark a human's decision met.** Criteria naming a person ("Ladan
+- **Never mark a human's decision met.** Criteria naming a person ("the owner
   approves…") are for that person. Put the node in `waiting` and stop.
 - **Never rewrite history.** The event log is append-only. Wrong state? Add the
   correcting event, with a note. The trail of a mistake is data.

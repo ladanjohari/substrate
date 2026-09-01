@@ -20,6 +20,7 @@ quietly and says nothing about it.
   substrate tree             open the visual view in a browser
 """
 
+import getpass
 import os
 import subprocess
 import sys
@@ -31,7 +32,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
-import substrate_store as store  # noqa: E402
+import substrate_store as store
+
+ACTOR = os.environ.get("SUBSTRATE_ACTOR") or getpass.getuser()  # noqa: E402
 
 STORE_URL = "http://localhost:8040"
 PAGES_URL = "http://localhost:8004"
@@ -87,7 +90,7 @@ import re  # noqa: E402
 # A judgement only a person can make.
 NEEDS_A_DECISION = re.compile(
     r"approved by|chosen by|marked as chosen|decides|decision required|"
-    r"sign.?off|human decision|ladan (approves|decides|picks|chooses)", re.I)
+    r"sign.?off|human decision|\w+ (approves|decides|picks|chooses)", re.I)
 
 # An action that happens in the world, not in text. No amount of writing
 # satisfies "a recording exists on disk" or "an Apple account is active", and
@@ -245,12 +248,12 @@ def do_approve(conn, goal):
             which = prompt_text("which number? ")
             if which.isdigit() and 1 <= int(which) <= len(tasks):
                 gone = tasks[int(which) - 1]
-                store.remove_node(conn, gone["id"], "ladan")
+                store.remove_node(conn, gone["id"], ACTOR)
                 say(c(DIM, f"removed: {gone['title']}"))
                 tasks = show_plan(conn, goal)
             continue
         if a == "":
-            store.append_event(conn, goal["id"], "working", "ladan",
+            store.append_event(conn, goal["id"], "working", ACTOR,
                                "approved from the terminal")
             say()
             say(c(GREEN, "Approved.") + " The tasks are live.")
@@ -313,7 +316,7 @@ def fix_criterion(conn, node, crits):
     if not new:
         say(c(DIM, "Left as it was."))
         return crits
-    was = store.edit_criterion(conn, x["id"], new, "ladan")["was"]
+    was = store.edit_criterion(conn, x["id"], new, ACTOR)["was"]
     say()
     say(c(GREEN, "Changed.") + " The old wording is kept in the log:")
     say(c(DIM, f'  was: "{was}"'))
@@ -396,12 +399,12 @@ def do_check(conn, node):
             if not why:
                 say(c(DIM, "Not accepted. A criterion needs evidence."))
                 continue
-            store.set_criterion(conn, x["id"], "met", "ladan", why)
+            store.set_criterion(conn, x["id"], "met", ACTOR, why)
             crits = [y for y in store.criteria_for(conn, node["id"])
                      if y["state"] != "met"]
             say(c(GREEN, "Recorded."))
             if not crits:
-                store.append_event(conn, node["id"], "done", "ladan",
+                store.append_event(conn, node["id"], "done", ACTOR,
                                    "every criterion met and evidenced")
                 say(c(GREEN, "That task is done."))
                 return (True, False)

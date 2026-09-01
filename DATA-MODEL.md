@@ -29,8 +29,8 @@ A real row, live from the store:
 ```
 id:             about-section/lock-bio
 title:          Lock the short bio text
-intent:         The bio must read as Ladan's own voice...
-exit_criterion: Ladan approves the final bio wording.
+intent:         The bio must read as the owner's own voice...
+exit_criterion: The owner approves the final bio wording.
 state:          waiting
 parent:         about-section
 ```
@@ -71,7 +71,7 @@ latest state of every node; this log is the truth, and it can be replayed.
 A real row:
 
 ```
-ts:    2026-07-17T05:18:43   actor: ladan
+ts:    2026-07-17T05:18:43   actor: owner
 node:  demo-video   waiting -> working
 note:  negotiated and approved on the sculpt surface
 ```

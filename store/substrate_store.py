@@ -97,7 +97,7 @@ PLAN_V1 = {
     "nodes": [
         ("A", "Lock the data model",
          "Agree what a goal, task, exit criterion, question, and state change look like as data.",
-         "Ladan signs off the data-model page; schema committed.", []),
+         "The owner signs off the data-model page; schema committed.", []),
         ("B", "The store: memory that survives sessions",
          "A database file plus a small always-on service; agents write through it, displays read.",
          "A state change written by one session is read back by a different session.", ["A"]),
@@ -112,7 +112,7 @@ PLAN_V1 = {
          "One task goes idle to working to done by an agent's own updates, evidence logged.", ["B"]),
         ("F", "The negotiation surface",
          "Where a proposed tree is reshaped and approved before anything runs.",
-         "Ladan reshapes and approves a proposed tree; the approval is recorded as an event.", ["C", "D"]),
+         "The owner reshapes and approves a proposed tree; the approval is recorded as an event.", ["C", "D"]),
         ("G", "The gate inbox",
          "Every amber question in one place; answering one unblocks its branch.",
          "Answering a question flips its node from waiting and its dependents start.", ["D", "E"]),
@@ -227,7 +227,7 @@ def seed():
             conn.execute("INSERT INTO edges (blocker,blocked) VALUES (?,?)", (b, nid))
     conn.commit()
     append_event(conn, "A", "working", "claude", "data model drafted, page built")
-    append_event(conn, "A", "done", "ladan", "exit met: v1 signed off in session, schema committed")
+    append_event(conn, "A", "done", "owner", "exit met: v1 signed off in session, schema committed")
     append_event(conn, "B", "working", "claude", "store build started")
     print("seeded plan v1 into", DB_PATH)
 

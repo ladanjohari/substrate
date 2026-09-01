@@ -46,7 +46,7 @@ IDLE_SLEEP = 6
 # no agent should be pretending to satisfy it.
 HUMAN = re.compile(
     r"approved by|chosen by|marked as chosen|decides|decision required|"
-    r"sign.?off|human decision|ladan (approves|decides|picks|chooses)", re.I)
+    r"sign.?off|human decision|\w+ (approves|decides|picks|chooses)", re.I)
 
 
 def api(path):

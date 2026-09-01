@@ -68,7 +68,7 @@ def api(path, payload=None):
 
 
 def human_task(t):
-    return bool(re.search(r"approved by|chosen by|marked as chosen|decides|decision required|sign.?off|human decision|ladan (approves|decides|picks|chooses)",
+    return bool(re.search(r"approved by|chosen by|marked as chosen|decides|decision required|sign.?off|human decision|\w+ (approves|decides|picks|chooses)",
                           (t["exit_criterion"] + " " + t["intent"]).lower()))
 
 
