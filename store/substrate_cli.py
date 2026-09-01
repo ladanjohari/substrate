@@ -36,6 +36,7 @@ import argparse
 import getpass
 import json
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -201,7 +202,13 @@ def boxes(n):
     return "".join(CRIT[c["state"]] for c in cs)
 
 
-def why(node, blockers, state):
+def width():
+    # Wrapping mid-word makes the tree unreadable, so every line is built to
+    # fit the window. Narrower than 60 is treated as 60; a pipe reports 80.
+    return max(60, shutil.get_terminal_size((80, 24)).columns)
+
+
+def why(node, blockers, state, room=None):
     if state == "done":
         return "done"
     if state == "working":
@@ -210,25 +217,42 @@ def why(node, blockers, state):
         return "waiting for you"
     if state == "error":
         return "error"
-    b = blockers.get(node, [])
-    return "after " + ", ".join(x.split("/")[-1] for x in b) if b else "ready to start"
+    b = [x.split("/")[-1] for x in blockers.get(node, [])]
+    if not b:
+        return "ready to start"
+    line = "after " + ", ".join(b)
+    if room is None or len(line) <= room:
+        return line
+    # Too long for the window: name the first one and count the rest, and if
+    # even that will not fit, cut the name rather than print a bare number.
+    if len(b) > 1:
+        short = f"after {b[0]} +{len(b) - 1} more"
+        if len(short) <= room:
+            return short
+        return f"after {len(b)} tasks"
+    return "after " + (b[0] if len(b[0]) + 6 <= room else b[0][:max(3, room - 7)] + "\u2026")
 
 
 def render_goal(g, tasks, blockers):
     head = f"{MARK[g['state']]} {g['id']}   {g['title']}"
+    if len(head) > width():
+        head = f"{MARK[g['state']]} {g['id']}\n    {g['title']}"
     if g["state"] == "waiting":
-        head += f"\n    not approved yet, so nothing runs:  substrate approve {g['id']}"
+        head += f"\n    not approved yet. To let it run:\n    substrate approve {g['id']}"
     if not tasks:
         return [head, "  (no tasks yet)"]
     tasks = order_tasks(tasks, blockers)
     names = [t["id"].split("/")[-1] for t in tasks]
     w = max(len(x) for x in names)
+    bw = max(len(boxes(t)) for t in tasks)
+    used = 3 + 1 + 1 + 1 + w + 2 + bw + 1        # elbow, marks, name, boxes, gaps
+    room = width() - used
     lines = [head]
     for i, t in enumerate(tasks):
         elbow = "└──" if i == len(tasks) - 1 else "├──"
         name = t["id"].split("/")[-1]
-        lines.append(f"{elbow} {MARK[t['state']]} {name:<{w}}  {boxes(t):<10} "
-                     f"{why(t['id'], blockers, t['state'])}")
+        lines.append(f"{elbow} {MARK[t['state']]} {name:<{w}}  {boxes(t):<{bw}} "
+                     f"{why(t['id'], blockers, t['state'], room)}")
     return lines
 
 
@@ -253,8 +277,9 @@ def cmd_tree(conn, a):
         lines += render_goal(g, tasks, blockers) + [""]
         payload.append(dict(g, tasks=tasks))
     if not a.json:
-        lines += [f"{CRIT['unmet']} open   {CRIT['met']} met   {CRIT['failed']} failed"
-                  "        substrate show <task>   for one task in full"]
+        lines += [f"{CRIT['unmet']} open   {CRIT['met']} met   {CRIT['failed']} failed",
+                  "substrate show <task>    one task in full",
+                  "substrate remove <task>  delete one"]
     out("\n".join(lines).rstrip(), payload, a.json)
 
 
