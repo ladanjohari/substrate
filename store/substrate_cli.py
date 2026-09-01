@@ -177,13 +177,67 @@ def cmd_approve(conn, a):
         f"  python3 store/runner.py --once", {"goal": goal, "state": "working"}, a.json)
 
 
+def order_tasks(tasks, blockers):
+    """Blockers before the things they block, so 'after X' always points up."""
+    left = {t["id"]: t for t in tasks}
+    placed, ordered = set(), []
+    while left:
+        ready = [t for t in left.values()
+                 if not [b for b in blockers.get(t["id"], []) if b in left and b not in placed]]
+        if not ready:                      # a cycle, should not happen; print the rest as is
+            ready = sorted(left.values(), key=lambda t: t["id"])
+        for t in sorted(ready, key=lambda t: t["id"]):
+            ordered.append(t); placed.add(t["id"]); left.pop(t["id"])
+    return ordered
+
+
+def boxes(n):
+    """Criteria as a row of boxes: ☑ met, ☒ failed, ☐ still open."""
+    cs = n.get("criteria") or []
+    if not cs:
+        return "no criteria"
+    if len(cs) > 8:
+        return f"{n['criteria_met']}/{n['criteria_total']}"
+    return "".join(CRIT[c["state"]] for c in cs)
+
+
+def why(node, blockers, state):
+    if state == "done":
+        return "done"
+    if state == "working":
+        return "working now"
+    if state == "waiting":
+        return "waiting for you"
+    if state == "error":
+        return "error"
+    b = blockers.get(node, [])
+    return "after " + ", ".join(x.split("/")[-1] for x in b) if b else "ready to start"
+
+
+def render_goal(g, tasks, blockers):
+    head = f"{MARK[g['state']]} {g['id']}   {g['title']}"
+    if g["state"] == "waiting":
+        head += f"\n    not approved yet, so nothing runs:  substrate approve {g['id']}"
+    if not tasks:
+        return [head, "  (no tasks yet)"]
+    tasks = order_tasks(tasks, blockers)
+    names = [t["id"].split("/")[-1] for t in tasks]
+    w = max(len(x) for x in names)
+    lines = [head]
+    for i, t in enumerate(tasks):
+        elbow = "└──" if i == len(tasks) - 1 else "├──"
+        name = t["id"].split("/")[-1]
+        lines.append(f"{elbow} {MARK[t['state']]} {name:<{w}}  {boxes(t):<10} "
+                     f"{why(t['id'], blockers, t['state'])}")
+    return lines
+
+
 def cmd_tree(conn, a):
     t = store.tree(conn)
-    by_id = {n["id"]: n for n in t["nodes"]}
     goals = [n for n in t["nodes"] if not n["parent"]]
     if not goals:
         out("no goals yet. Start one:\n"
-            "  substrate add ship-cli \"Ship the CLI\" -c \"A stranger runs all seven commands from the README\"",
+            "  substrate decompose        and type your goal when it asks",
             [], a.json)
         return
     if a.goal:
@@ -193,25 +247,26 @@ def cmd_tree(conn, a):
     blockers = {}
     for e in t["edges"]:
         blockers.setdefault(e["blocked"], []).append(e["blocker"])
-    lines = []
+    lines, payload = [], []
     for g in goals:
-        lines.append(f"{MARK[g['state']]} {g['id']}  — {g['title']}  [{g['state']}]")
-        for n in [x for x in t["nodes"] if x["parent"] == g["id"]]:
-            b = blockers.get(n["id"], [])
-            after = "  after " + ", ".join(s.split("/")[-1] for s in b) if b else ""
-            lines.append(f"    {MARK[n['state']]} {n['id'].split('/')[-1]:<28} "
-                         f"{crit_tag(n):<22}{after}")
-        lines.append("")
-    payload = [dict(g, tasks=[n for n in t["nodes"] if n["parent"] == g["id"]]) for g in goals]
+        tasks = [n for n in t["nodes"] if n["parent"] == g["id"]]
+        lines += render_goal(g, tasks, blockers) + [""]
+        payload.append(dict(g, tasks=tasks))
+    if not a.json:
+        lines += [f"{CRIT['unmet']} open   {CRIT['met']} met   {CRIT['failed']} failed"
+                  "        substrate show <task>   for one task in full"]
     out("\n".join(lines).rstrip(), payload, a.json)
-    _ = by_id
 
 
 def cmd_frontier(conn, a):
     ids = store.frontier(conn)
     rows = [dict(conn.execute("SELECT id,title,parent FROM nodes WHERE id=?", (i,)).fetchone())
             for i in ids]
-    human = "\n".join(f"  {r['id']}\n      {r['title']}" for r in rows) or "  nothing is runnable"
+    if not rows:
+        out("nothing is runnable. Everything is waiting, blocked, or done.", rows, a.json)
+        return
+    w = max(len(r["id"]) for r in rows)
+    human = "\n".join(f"  {r['id']:<{w}}   {r['title']}" for r in rows)
     out(f"Runnable now ({len(rows)}):\n{human}", rows, a.json)
 
 
@@ -221,11 +276,22 @@ def cmd_path(conn, a):
     for gid, v in cp.items():
         if not v["path"]:
             continue
-        lines.append(f"{gid} — {v['title']}   {v['cost']} open criteria deep")
-        for p in v["path"]:
-            lines.append(f"    {MARK[p['state']]} {p['id'].split('/')[-1]:<30}"
-                         f"{p['open_criteria']} open")
-        lines.append(f"    -> start with: {v['next'] or 'nothing runnable, head is ' + v['head']}")
+        gstate = conn.execute("SELECT state FROM nodes WHERE id=?", (gid,)).fetchone()["state"]
+        lines.append(f"{gid}   {v['title']}")
+        lines.append(f"the longest chain left: {v['cost']} open criteria")
+        w = max(len(p["id"].split("/")[-1]) for p in v["path"])
+        for i, p in enumerate(v["path"]):
+            elbow = "└──" if i == len(v["path"]) - 1 else "├──"
+            n = p["id"].split("/")[-1]
+            lines.append(f"{elbow} {MARK[p['state']]} {n:<{w}}  {p['open_criteria']} open")
+        nxt = v["next"]
+        if nxt:
+            lines.append(f"start with: {nxt}")
+        elif gstate == "waiting":
+            lines.append(f"nothing can start: this goal is not approved yet."
+                         f"  substrate approve {gid}")
+        else:
+            lines.append(f"nothing can start: {v['head'].split('/')[-1]} is waiting on a person")
         lines.append("")
     out("\n".join(lines).rstrip() or "every goal is closed", cp, a.json)
 
