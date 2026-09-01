@@ -142,7 +142,11 @@ if __name__ == "__main__":
     # left no way of knowing the plan was sitting there waiting for a person.
     print()
     print("This plan is WAITING FOR YOU. Nothing runs until you approve it.")
-    print("Open this page to read it, reshape it, and approve:")
-    print()
+    print("In the terminal:")
+    print(f"    substrate tree {gid}            read it")
+    print("    substrate show <task>           one task and its criteria")
+    print("    substrate edit / block / remove reshape it")
+    print(f"    substrate approve {gid}         let the runner start on it")
+    print("Or in the browser, if the pages are running:")
     print("    http://localhost:8004/prototypes/negotiate/negotiate.html")
     print()

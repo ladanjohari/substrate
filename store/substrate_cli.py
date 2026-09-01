@@ -6,6 +6,8 @@ Talks straight to the SQLite file, so it works whether or not the store service
 is running, and anything it writes shows up in the live tree on the next poll.
 Every command takes --json for agents; the default output is for humans.
 
+  substrate decompose "a goal"         one sentence in, a proposed tree out (uses claude once)
+  substrate approve <goal>             let the runner start on a waiting goal
   substrate add <id> TITLE -c ""       create a goal, or a task inside one (goal/task)
   substrate edit <node> -t "" -i ""    change a node's title, intent, or headline criterion
   substrate block <node> --after X     one task waits on another
@@ -140,6 +142,32 @@ def cmd_remove(conn, a):
     out(f"removed {node}{extra}", {"removed": gone}, a.json)
 
 
+def cmd_decompose(conn, a):
+    # One sentence in, a proposed tree out, written straight to the database.
+    # Uses the `claude` command once. The goal arrives waiting for approval.
+    import decompose
+    print("thinking (one AI call)...")
+    plan = decompose.think(" ".join(a.sentence))
+    gid = decompose.store_proposal(plan)
+    a.goal = gid
+    cmd_tree(conn, a)
+    if not a.json:
+        print(f"\nwaiting for you. Read it, reshape it, then: substrate approve {gid}")
+
+
+def cmd_approve(conn, a):
+    goal = resolve(conn, a.goal)
+    row = conn.execute("SELECT state, parent FROM nodes WHERE id=?", (goal,)).fetchone()
+    if row["parent"]:
+        sys.exit(f"{goal} is a task; approve its goal: {row['parent']}")
+    if row["state"] != "waiting":
+        sys.exit(f"{goal} is {row['state']}, only a waiting goal can be approved")
+    store.append_event(conn, goal, "working", actor(),
+                       a.note or "approved from the command line; the runner may start")
+    out(f"{goal} approved. The runner picks it up when it is running:\n"
+        f"  python3 store/runner.py --once", {"goal": goal, "state": "working"}, a.json)
+
+
 def cmd_tree(conn, a):
     t = store.tree(conn)
     by_id = {n["id"]: n for n in t["nodes"]}
@@ -258,6 +286,10 @@ def main():
     p.add_argument("--json", action="store_true", help="machine-readable output")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    s = sub.add_parser("decompose", help="one sentence in, a proposed tree out (uses claude once)")
+    s.add_argument("sentence", nargs="+")
+    s = sub.add_parser("approve", help="let the runner start on a waiting goal")
+    s.add_argument("goal"); s.add_argument("-n", "--note")
     s = sub.add_parser("add", help="create a goal, or a task as goal/slug")
     s.add_argument("id"); s.add_argument("title")
     s.add_argument("-i", "--intent", help="why this exists, one sentence")
@@ -293,6 +325,7 @@ def main():
     a = p.parse_args()
     conn = store.db()
     dispatch = {
+        "decompose": cmd_decompose, "approve": cmd_approve,
         "add": cmd_add, "edit": cmd_edit, "block": cmd_block, "unblock": cmd_unblock,
         "remove": cmd_remove,
         "tree": cmd_tree, "frontier": cmd_frontier, "path": cmd_path, "show": cmd_show,
