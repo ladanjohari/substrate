@@ -94,8 +94,13 @@ def store_proposal(plan):
     conn = s.db()
     g = plan["goal"]
     gid = g["id"]
-    if conn.execute("SELECT 1 FROM nodes WHERE id=?", (gid,)).fetchone():
-        sys.exit(f"goal id already exists: {gid}")
+    # Ids must be unique, and a removed goal keeps its id so the log still
+    # reads. A second goal with the same name gets -2, -3, and so on.
+    base, n = gid, 1
+    while conn.execute("SELECT 1 FROM nodes WHERE id=?", (gid,)).fetchone():
+        n += 1
+        gid = f"{base}-{n}"
+    g["id"] = gid
     conn.execute(
         "INSERT INTO nodes (id,title,intent,exit_criterion,state) VALUES (?,?,?,?, 'idle')",
         (gid, g["title"], g["intent"], g["exit_criterion"]),

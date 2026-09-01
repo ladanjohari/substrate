@@ -6,7 +6,8 @@ Talks straight to the SQLite file, so it works whether or not the store service
 is running, and anything it writes shows up in the live tree on the next poll.
 Every command takes --json for agents; the default output is for humans.
 
-  substrate decompose "a goal"         one sentence in, a proposed tree out (uses claude once)
+  substrate                            the tree (same as substrate tree)
+  substrate decompose ["a goal"]       one sentence in, a proposed tree out; asks if you give none
   substrate approve <goal>             let the runner start on a waiting goal
   substrate add <id> TITLE -c ""       create a goal, or a task inside one (goal/task)
   substrate edit <node> -t "" -i ""    change a node's title, intent, or headline criterion
@@ -146,8 +147,16 @@ def cmd_decompose(conn, a):
     # One sentence in, a proposed tree out, written straight to the database.
     # Uses the `claude` command once. The goal arrives waiting for approval.
     import decompose
-    print("thinking (one AI call)...")
-    plan = decompose.think(" ".join(a.sentence))
+    sentence = " ".join(a.sentence).strip()
+    if not sentence:
+        try:
+            sentence = input("Your goal, in one sentence: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit("\nno goal given")
+    if not sentence:
+        sys.exit("no goal given")
+    print("thinking (one AI call, about half a minute)...")
+    plan = decompose.think(sentence)
     gid = decompose.store_proposal(plan)
     a.goal = gid
     cmd_tree(conn, a)
@@ -284,10 +293,10 @@ def main():
     p = argparse.ArgumentParser(prog="substrate", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--json", action="store_true", help="machine-readable output")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd")  # no command means: show the tree
 
     s = sub.add_parser("decompose", help="one sentence in, a proposed tree out (uses claude once)")
-    s.add_argument("sentence", nargs="+")
+    s.add_argument("sentence", nargs="*", help="leave empty to be asked")
     s = sub.add_parser("approve", help="let the runner start on a waiting goal")
     s.add_argument("goal"); s.add_argument("-n", "--note")
     s = sub.add_parser("add", help="create a goal, or a task as goal/slug")
@@ -323,6 +332,8 @@ def main():
     s = sub.add_parser("log"); s.add_argument("n", nargs="?", type=int, default=15)
 
     a = p.parse_args()
+    if a.cmd is None:
+        a.cmd, a.goal = "tree", None
     conn = store.db()
     dispatch = {
         "decompose": cmd_decompose, "approve": cmd_approve,
