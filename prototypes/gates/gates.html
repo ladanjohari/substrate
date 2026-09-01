@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Substrate &middot; Gates</title>
+<style>
+:root{
+  --text-1: rgba(255,255,255,0.82); --text-2: rgba(255,255,255,0.5);
+  --text-3: rgba(255,255,255,0.28); --text-4: rgba(255,255,255,0.18);
+  --bd-1: rgba(255,255,255,0.13); --bd-2: rgba(255,255,255,0.07);
+  --bg:#0a0a0a; --card: rgba(255,255,255,0.025);
+  --fill-hover: rgba(255,255,255,0.05);
+  --ok:#34C759; --gate:#E8952A; --err:#FF453A; --idle: rgba(255,255,255,0.22);
+}
+body.lm{
+  --text-1: rgba(0,0,0,0.82); --text-2: rgba(0,0,0,0.52);
+  --text-3: rgba(0,0,0,0.32); --text-4: rgba(0,0,0,0.2);
+  --bd-1: rgba(0,0,0,0.14); --bd-2: rgba(0,0,0,0.08);
+  --bg:#f5f5f4; --card: rgba(0,0,0,0.02); --fill-hover: rgba(0,0,0,0.045);
+  --idle: rgba(0,0,0,0.22);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text-1);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:720px;margin:0 auto;padding:48px 28px 80px;}
+.eyebrow{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:12px;}
+h1{font-size:20px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}
+.sub{font-size:12.5px;color:var(--text-2);line-height:1.6;max-width:560px;}
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px;}
+.mode-btn{flex:none;font-size:11px;color:var(--text-2);background:transparent;border:.5px solid var(--bd-1);border-radius:20px;padding:5px 13px;cursor:pointer;font-family:inherit;min-height:32px;}
+.status-line{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text-3);margin:6px 0 26px;}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);}
+.pulse.offline{background:var(--err);}
+.section{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin:26px 0 12px;display:flex;align-items:center;gap:8px;}
+.gdot{width:7px;height:7px;border-radius:50%;background:var(--gate);animation:breathe 1.8s ease-in-out infinite;}
+@keyframes breathe{0%,100%{opacity:1;}50%{opacity:.35;}}
+@media (prefers-reduced-motion: reduce){.gdot{animation:none;}}
+.gate-card{border:.5px solid rgba(232,149,42,0.35);border-radius:13px;background:var(--card);padding:16px 18px;margin-bottom:12px;}
+.gate-card .who{font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;}
+.gate-card h2{font-size:13.5px;font-weight:600;margin-bottom:3px;}
+.gate-card .goal-line{font-size:11px;color:var(--text-3);margin-bottom:10px;}
+.gate-card .q{font-size:13px;color:var(--text-1);line-height:1.65;border-left:2px solid var(--gate);padding-left:12px;margin-bottom:12px;}
+.gate-card .holds{font-size:11px;color:var(--text-3);margin-bottom:12px;line-height:1.6;}
+.gate-card textarea{width:100%;font-size:12.5px;line-height:1.6;color:var(--text-1);background:var(--fill-hover);border:.5px solid var(--bd-1);border-radius:9px;padding:9px 11px;font-family:inherit;resize:vertical;min-height:52px;}
+.btns{display:flex;gap:8px;margin-top:10px;align-items:center;}
+.btn{font-size:11.5px;border:.5px solid var(--bd-1);border-radius:15px;padding:8px 16px;color:var(--text-2);cursor:pointer;background:transparent;font-family:inherit;min-height:32px;}
+.btn:hover{background:var(--fill-hover);}
+.btn:focus-visible{outline:1.5px solid var(--text-1);outline-offset:2px;}
+.btn.answer{color:var(--ok);border-color:var(--ok);font-weight:600;}
+.nego-card{border:.5px solid var(--bd-2);border-radius:13px;background:var(--card);padding:14px 18px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+.nego-card .t{font-size:13px;}
+.nego-card .t small{display:block;font-size:11px;color:var(--text-3);margin-top:2px;}
+.nego-card a{font-size:11.5px;color:var(--gate);text-decoration:none;border:.5px solid rgba(232,149,42,0.4);border-radius:15px;padding:7px 14px;white-space:nowrap;}
+.empty{font-size:12.5px;color:var(--text-3);line-height:1.7;padding:26px 0;}
+footer{margin-top:56px;padding-top:18px;border-top:.5px solid var(--bd-2);font-size:11px;color:var(--text-4);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">Substrate &middot; Gates &middot; Slice G</div>
+      <h1>Waiting on you</h1>
+      <p class="sub">Every amber light in one place. Agents keep working around these;
+      each answer you give releases a branch. This is the human's whole job in the
+      system. Everything else runs without you.</p>
+    </div>
+    <button class="mode-btn" onclick="document.body.classList.toggle('lm');this.textContent=document.body.classList.contains('lm')?'Dark':'Light'">Light</button>
+  </div>
+  <div class="status-line"><span class="pulse" id="pulse"></span><span id="status">connecting</span></div>
+
+  <div id="inbox"></div>
+
+  <footer>
+    <span>Substrate &middot; gate inbox v1</span>
+    <span>Working Document &middot; Not for distribution</span>
+  </footer>
+</div>
+
+<script>
+const STORE='http://localhost:8040';
+window.ACTOR='ladan';
+let SNAP='';
+
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function api(path,payload){
+  const opt=payload?{method:'POST',body:JSON.stringify(payload)}:{};
+  const r=await fetch(STORE+path,opt); return r.json();
+}
+
+async function refresh(){
+  try{
+    const [tree,log]=await Promise.all([api('/tree'),api('/log')]);
+    document.getElementById('pulse').className='pulse';
+    document.getElementById('status').textContent='reading the store';
+    const snap=JSON.stringify(tree.nodes.map(n=>[n.id,n.state]))+log.length;
+    if(snap===SNAP)return; SNAP=snap;
+    render(tree,log);
+  }catch(e){
+    document.getElementById('pulse').className='pulse offline';
+    document.getElementById('status').textContent='not running · double-click Open Substrate.command to start it';
+  }
+}
+
+function render(tree,log){
+  const byId={}; tree.nodes.forEach(n=>byId[n.id]=n);
+  const questions=tree.nodes.filter(n=>n.parent&&n.state==='waiting');
+  const negotiations=tree.nodes.filter(n=>!n.parent&&n.state==='waiting');
+  let html='';
+
+  html+=`<div class="section"><span class="gdot"></span>questions from agents &middot; ${questions.length}</div>`;
+  if(!questions.length) html+=`<div class="empty">No agent is waiting on you. The tree breathes on without you for now.</div>`;
+  questions.forEach(n=>{
+    const ev=[...log].reverse().find(e=>e.node===n.id&&e.to_state==='waiting');
+    const q=ev?ev.note:'(no question recorded)';
+    const who=ev?ev.actor:'agent';
+    const when=ev?ev.ts.slice(5,16).replace('T',' '):'';
+    const held=tree.edges.filter(e=>e.blocker===n.id).map(e=>byId[e.blocked]).filter(Boolean);
+    const goal=byId[n.parent];
+    html+=`<div class="gate-card">
+      <div class="who">${esc(who)} &middot; ${esc(when)}</div>
+      <h2>${esc(n.title)}</h2>
+      <div class="goal-line">${esc(goal?goal.title:n.parent)}</div>
+      <div class="q">${esc(q)}</div>
+      ${held.length?`<div class="holds">your answer releases: ${held.map(h=>esc(h.title)).join(' · ')}</div>`:''}
+      <textarea id="a-${esc(n.id)}" placeholder="Your answer, in plain words" aria-label="Answer for ${esc(n.title)}"></textarea>
+      <div class="btns"><button class="btn answer" onclick="answer('${esc(n.id)}')">Answer &amp; release</button></div>
+    </div>`;
+  });
+
+  html+=`<div class="section">plans awaiting negotiation &middot; ${negotiations.length}</div>`;
+  if(!negotiations.length) html+=`<div class="empty">No proposals waiting.</div>`;
+  negotiations.forEach(g=>{
+    html+=`<div class="nego-card"><div class="t">${esc(g.title)}<small>proposed plan, nothing runs until you approve it</small></div>
+      <a href="../negotiate/negotiate.html">negotiate</a></div>`;
+  });
+
+  document.getElementById('inbox').innerHTML=html;
+}
+
+async function answer(id){
+  const ta=document.getElementById('a-'+id);
+  const text=(ta&&ta.value.trim())||'';
+  if(!text){ta.focus();return;}
+  await api('/event',{node:id,to:'working',actor:window.ACTOR,note:'answered: '+text});
+  SNAP=''; await refresh();
+}
+
+refresh();
+setInterval(refresh,1500);
+</script>
+<script src="../_nav.js"></script>
+</body>
+</html>

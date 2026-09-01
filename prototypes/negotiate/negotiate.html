@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Substrate &middot; Negotiate</title>
+<style>
+:root{
+  --text-1: rgba(255,255,255,0.82); --text-2: rgba(255,255,255,0.5);
+  --text-3: rgba(255,255,255,0.28); --text-4: rgba(255,255,255,0.18);
+  --bd-1: rgba(255,255,255,0.13); --bd-2: rgba(255,255,255,0.07);
+  --bg:#0a0a0a; --card: rgba(255,255,255,0.025);
+  --fill-hover: rgba(255,255,255,0.05);
+  --ok:#34C759; --gate:#E8952A; --err:#FF453A;
+  --idle: rgba(255,255,255,0.22); --edge: rgba(255,255,255,0.14); --live:#fff;
+  --pop:#141414;
+}
+body.lm{
+  --text-1: rgba(0,0,0,0.82); --text-2: rgba(0,0,0,0.52);
+  --text-3: rgba(0,0,0,0.32); --text-4: rgba(0,0,0,0.2);
+  --bd-1: rgba(0,0,0,0.14); --bd-2: rgba(0,0,0,0.08);
+  --bg:#f5f5f4; --card: rgba(0,0,0,0.02); --fill-hover: rgba(0,0,0,0.045);
+  --idle: rgba(0,0,0,0.22); --edge: rgba(0,0,0,0.14); --live:#111; --pop:#ffffff;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text-1);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:1020px;margin:0 auto;padding:48px 28px 80px;}
+.eyebrow{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:12px;}
+h1{font-size:20px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}
+.sub{font-size:12.5px;color:var(--text-2);line-height:1.6;max-width:640px;}
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px;}
+.mode-btn{flex:none;font-size:11px;color:var(--text-2);background:transparent;border:.5px solid var(--bd-1);border-radius:20px;padding:5px 13px;cursor:pointer;font-family:inherit;min-height:32px;}
+.status-line{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--text-3);margin:8px 0 18px;flex-wrap:wrap;}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);}
+.pulse.offline{background:var(--err);}
+select{font-size:11px;color:var(--text-2);background:transparent;border:.5px solid var(--bd-1);border-radius:6px;padding:4px 8px;font-family:inherit;min-height:30px;}
+.panel{border:.5px solid var(--bd-1);border-radius:14px;background:var(--card);padding:18px;position:relative;}
+.panel-label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-4);margin-bottom:10px;}
+svg text{font-family:inherit;}
+.node-g{cursor:pointer;outline:none;}
+.node-g:focus circle:first-of-type{stroke:var(--text-1);stroke-width:1.5;}
+.pop{position:absolute;width:290px;background:var(--pop);border:.5px solid var(--bd-1);border-radius:12px;padding:14px 16px;z-index:5;box-shadow:0 8px 30px rgba(0,0,0,0.35);animation:popIn .15s ease-out;}
+@keyframes popIn{from{opacity:0;transform:translateY(-4px) scale(.97);}to{opacity:1;transform:none;}}
+@media (prefers-reduced-motion: reduce){.pop{animation:none;} svg animate{display:none;}}
+.pop h3{font-size:12.5px;font-weight:600;margin-bottom:6px;}
+.pop .meta{font-size:10.5px;color:var(--text-3);margin-bottom:8px;line-height:1.5;}
+.pop .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-4);margin:8px 0 3px;}
+.pop textarea{width:100%;font-size:12px;line-height:1.55;color:var(--text-1);background:var(--fill-hover);border:.5px solid var(--bd-1);border-radius:7px;padding:8px 10px;font-family:inherit;resize:vertical;min-height:52px;}
+.btn{font-size:11.5px;border:.5px solid var(--bd-1);border-radius:15px;padding:8px 14px;color:var(--text-2);cursor:pointer;background:transparent;font-family:inherit;min-height:32px;transition:all .12s;}
+.btn:hover{background:var(--fill-hover);}
+.btn:focus-visible{outline:1.5px solid var(--text-1);outline-offset:2px;}
+.btn.keep{color:var(--ok);border-color:var(--ok);}
+.btn.remove{color:var(--err);border-color:rgba(255,69,58,0.4);}
+.btn.primary{color:#0a0a0a;background:var(--ok);border-color:var(--ok);font-weight:600;}
+.btn.primary:disabled{opacity:.35;cursor:not-allowed;}
+.btns{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap;}
+.approve-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;padding-top:12px;border-top:.5px solid var(--bd-2);font-size:11.5px;color:var(--text-3);flex-wrap:wrap;}
+.armed{font-size:12px;color:var(--ok);border:.5px solid var(--ok);border-radius:10px;padding:10px 14px;line-height:1.6;margin-top:14px;}
+.empty{font-size:12.5px;color:var(--text-3);line-height:1.7;padding:30px 0;text-align:center;}
+footer{margin-top:48px;padding-top:18px;border-top:.5px solid var(--bd-2);font-size:11px;color:var(--text-4);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">Substrate &middot; Negotiate &middot; Slice F</div>
+      <h1>Sculpt the plan</h1>
+      <p class="sub">Proposed goals arrive here amber. Tap a dot and its decision card
+      pops out of the dot: rewrite the exit criterion in your words, keep, or remove.
+      When every dot is green, hold the goal dot (or use the Approve button) to arm the
+      plan. Only then do its tasks reach the frontier. Every change is written to the
+      store as an event.</p>
+    </div>
+    <button class="mode-btn" onclick="document.body.classList.toggle('lm');this.textContent=document.body.classList.contains('lm')?'Dark':'Light'">Light</button>
+  </div>
+  <div class="status-line">
+    <span class="pulse" id="pulse"></span><span id="status">connecting</span>
+    <select id="goal-picker" onchange="currentGoal=this.value;selected=null;kept={};refresh(true)" aria-label="Choose a proposed goal"></select>
+  </div>
+
+  <div class="panel" id="board">
+    <div class="panel-label" id="board-label">Proposal</div>
+    <div id="canvas" class="empty">Reading the store&hellip;</div>
+    <div id="pop-slot"></div>
+    <div class="approve-row" id="approve-row" style="display:none">
+      <span id="progress"></span>
+      <button class="btn primary" id="approve-btn" disabled onclick="approve()">Approve plan</button>
+    </div>
+    <div id="armed-slot"></div>
+  </div>
+
+  <footer>
+    <span>Substrate &middot; negotiation surface v1 &middot; sculpt on the tree</span>
+    <span>Working Document &middot; Not for distribution</span>
+  </footer>
+</div>
+
+<script>
+const STORE = 'http://localhost:8040';
+let DATA=null, LOGN=0, currentGoal=null, selected=null, kept={}, justArmed=false;
+
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function api(path, payload){
+  const opt = payload ? {method:'POST', body:JSON.stringify(payload)} : {};
+  const r = await fetch(STORE+path, opt);
+  return r.json();
+}
+
+function goals(){ return DATA.nodes.filter(n=>!n.parent); }
+function tasksOf(g){ return DATA.nodes.filter(n=>n.parent===g); }
+function edgesOf(g){ const ids=tasksOf(g).map(t=>t.id); return DATA.edges.filter(e=>ids.includes(e.blocked)&&ids.includes(e.blocker)); }
+
+async function refresh(force){
+  try{
+    const [t, log] = await Promise.all([api('/tree'), api('/log')]);
+    document.getElementById('pulse').className='pulse';
+    document.getElementById('status').textContent='reading the store';
+    const changed = JSON.stringify(t.nodes)+log.length !== LOGN;
+    LOGN = JSON.stringify(t.nodes)+log.length;
+    DATA = t;
+    const waiting = goals().filter(g=>g.state==='waiting');
+    const pick = document.getElementById('goal-picker');
+    pick.innerHTML = waiting.map(g=>`<option value="${esc(g.id)}" ${g.id===currentGoal?'selected':''}>${esc(g.title)}</option>`).join('') || '<option>no proposals waiting</option>';
+    if(!currentGoal || !waiting.find(g=>g.id===currentGoal)){
+      currentGoal = waiting[0] ? waiting[0].id : null;
+    }
+    if(changed || force) draw();
+  }catch(e){
+    document.getElementById('pulse').className='pulse offline';
+    document.getElementById('status').textContent='not running · double-click Open Substrate.command to start it';
+  }
+}
+
+function draw(){
+  const canvas=document.getElementById('canvas');
+  document.getElementById('pop-slot').innerHTML='';
+  if(!currentGoal){
+    canvas.className='empty';
+    // An empty inbox is the normal, healthy state: it means nothing is waiting
+    // on you. It used to read like a dead end, with no way of knowing where the
+    // plan you just approved had gone. Now it says what is running and points
+    // at the page where you can watch it.
+    const running = goals().filter(g => g.state === 'working');
+    const head = justArmed
+      ? '<div style="color:var(--ok);margin-bottom:14px;">Plan approved.</div>'
+      : '';
+    canvas.innerHTML = head +
+      '<div style="margin-bottom:14px;">Nothing is waiting for your approval.</div>' +
+      (running.length
+        ? '<div style="font-size:12px;color:var(--text-3);line-height:1.9;margin-bottom:16px;">' +
+          running.length + ' plan' + (running.length > 1 ? 's are' : ' is') +
+          ' approved and running:<br>' +
+          running.map(g => '&middot; ' + esc(g.title)).join('<br>') + '</div>' +
+          '<div style="font-size:12px;"><a href="../live-tree/live-tree.html" ' +
+          'style="color:var(--ok);text-decoration:none;border-bottom:.5px solid var(--ok);">' +
+          'Watch them on the live tree</a>' +
+          '<span style="color:var(--text-4);"> &middot; or start another from ' +
+          '<a href="../canvas/canvas.html" style="color:var(--text-2);text-decoration:none;' +
+          'border-bottom:.5px solid var(--bd-1);">New goal on the canvas</a></span></div>'
+        : '<div style="font-size:12px;color:var(--text-3);">Start one with ' +
+          '<a href="../canvas/canvas.html" style="color:var(--text-2);text-decoration:none;' +
+          'border-bottom:.5px solid var(--bd-1);">New goal on the canvas</a>.</div>');
+    document.getElementById('approve-row').style.display='none';
+    return;
+  }
+  canvas.className='';
+  const g = goals().find(x=>x.id===currentGoal);
+  const tasks = tasksOf(currentGoal), edges = edgesOf(currentGoal);
+  document.getElementById('board-label').textContent = 'Proposal · ' + g.title;
+
+  const memo={};
+  const d=id=>memo[id]??(memo[id]=(edges.filter(e=>e.blocked===id).length?1+Math.max(...edges.filter(e=>e.blocked===id).map(e=>d(e.blocker))):0));
+  tasks.forEach(t=>d(t.id));
+  const maxD=Math.max(...tasks.map(t=>memo[t.id]),0);
+  const cols=[];for(let k=0;k<=maxD;k++)cols.push(tasks.filter(t=>memo[t.id]===k));
+  const W=920, H=Math.max(...cols.map(c=>c.length),1)*84+80;
+  const colGap=(W-90-160)/Math.max(1,maxD);
+  const colX=k=>90+k*colGap;
+  // Each node has an invisible rectangle behind its label so the words are
+  // clickable too. It was a fixed 220px wide, which is wider than the gap
+  // between columns as soon as a plan has five or more of them, so a node's
+  // rectangle covered the dot of the node to its right and ate the click.
+  // The rectangle now stops short of the next column.
+  const hitW=Math.max(70,Math.min(220,colGap-10));
+  const pos={};
+  cols.forEach((col,k)=>col.forEach((t,i)=>{pos[t.id]={x:colX(k),y:48+(i+0.5)*((H-70)/col.length)};}));
+
+  let svg=`<svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" id="tree-svg" data-w="${W}" data-h="${H}" role="group" aria-label="Proposed plan for ${esc(g.title)}">`;
+  const gx=38, gy=H/2;
+  const all = tasks.length>0 && tasks.every(t=>kept[t.id]);
+  svg+=`<text x="${gx}" y="${gy-24}" font-size="11" fill="var(--text-2)">The goal</text>`;
+  svg+=`<g id="goal-dot" style="cursor:${all?'pointer':'default'}" tabindex="0" role="button" aria-label="Hold to approve the plan">
+    ${all?`<circle cx="${gx}" cy="${gy}" r="14" fill="none" stroke="var(--gate)" stroke-width="1" opacity="0.5"><animate attributeName="r" values="11;15;11" dur="1.6s" repeatCount="indefinite"/></circle>`:''}
+    <circle cx="${gx}" cy="${gy}" r="8" fill="none" stroke="var(--gate)" stroke-width="1.5"/>
+    <circle cx="${gx}" cy="${gy}" r="22" fill="transparent"/></g>`;
+  edges.forEach(e=>{
+    const a=pos[e.blocker], b=pos[e.blocked]; if(!a||!b)return;
+    const mx=(a.x+b.x)/2;
+    svg+=`<path d="M${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}" fill="none" stroke="var(--edge)" stroke-width="1.2"/>`;
+  });
+  tasks.filter(t=>!edges.some(e=>e.blocked===t.id)).forEach(t=>{
+    const p=pos[t.id], mx=(gx+p.x)/2;
+    svg+=`<path d="M${gx+9} ${gy} C ${mx} ${gy}, ${mx} ${p.y}, ${p.x} ${p.y}" fill="none" stroke="var(--edge)" stroke-width="1.2"/>`;
+  });
+  tasks.forEach(t=>{
+    const p=pos[t.id];
+    const fill = kept[t.id] ? 'var(--ok)' : 'var(--gate)';
+    const ring = selected===t.id ? `<circle cx="${p.x}" cy="${p.y}" r="12" fill="none" stroke="${fill}" stroke-width="1" opacity="0.5"/>` : '';
+    svg+=`<g class="node-g" tabindex="0" role="button" aria-label="${esc(t.title)}, ${kept[t.id]?'kept':'awaiting your decision'}" data-id="${esc(t.id)}" data-x="${p.x}" data-y="${p.y}">${ring}
+      <circle cx="${p.x}" cy="${p.y}" r="7" fill="${fill}"/>
+      <text x="${p.x+14}" y="${p.y-13}" font-size="11" fill="var(--text-1)">${esc(t.title.length>24?t.title.slice(0,23)+'…':t.title)}</text>
+      <text x="${p.x+14}" y="${p.y+21}" font-size="9.5" fill="${kept[t.id]?'var(--ok)':'var(--text-4)'}">${kept[t.id]?'kept':'proposed'}</text>
+      <rect x="${p.x-16}" y="${p.y-28}" width="${hitW}" height="56" fill="transparent"/></g>`;
+  });
+  svg+='</svg>';
+  canvas.innerHTML=svg;
+
+  canvas.querySelectorAll('.node-g[data-id]').forEach(el=>{
+    el.addEventListener('click',()=>pick(el.dataset.id));
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick(el.dataset.id);}});
+  });
+  wireHold(all);
+
+  document.getElementById('approve-row').style.display='flex';
+  const done = tasks.filter(t=>kept[t.id]).length;
+  document.getElementById('progress').textContent = `${done} of ${tasks.length} decided · every change is saved to the store as you make it`;
+  document.getElementById('approve-btn').disabled = !all;
+  document.getElementById('armed-slot').innerHTML='';
+  if(selected) openPop();
+}
+
+function pick(id){ selected = selected===id ? null : id; draw(); }
+
+function openPop(){
+  const svg=document.getElementById('tree-svg'); if(!svg||!selected)return;
+  const g=[...svg.querySelectorAll('.node-g')].find(n=>n.dataset.id===selected); if(!g)return;
+  const t=tasksOf(currentGoal).find(x=>x.id===selected); if(!t)return;
+  const W=+svg.dataset.w, H=+svg.dataset.h;
+  const board=document.getElementById('board');
+  const rect=svg.getBoundingClientRect(), prect=board.getBoundingClientRect();
+  const px=(+g.dataset.x/W)*rect.width+(rect.left-prect.left);
+  const py=(+g.dataset.y/H)*rect.height+(rect.top-prect.top);
+  const blockers = edgesOf(currentGoal).filter(e=>e.blocked===selected).map(e=>{
+    const b=tasksOf(currentGoal).find(x=>x.id===e.blocker); return b?b.title:e.blocker;});
+  const pop=document.createElement('div');
+  pop.className='pop';
+  pop.style.left=Math.max(8, Math.min(px+20, prect.width-310))+'px';
+  pop.style.top=(py+16)+'px';
+  pop.innerHTML=`<h3>${esc(t.title)}</h3>
+    <div class="meta">${esc(t.intent)}</div>
+    <div class="meta">${blockers.length?'after: '+esc(blockers.join(' · ')):'starts when the plan is approved'}</div>
+    <div class="k">Exit criterion, rewrite it in your words</div>
+    <textarea id="exit-ta">${esc(t.exit_criterion)}</textarea>
+    <div class="btns">
+      <button class="btn keep" onclick="keepNode()">keep</button>
+      <button class="btn remove" onclick="removeNode()">remove</button>
+      <button class="btn" onclick="selected=null;draw()">close</button>
+    </div>`;
+  document.getElementById('pop-slot').innerHTML='';
+  document.getElementById('pop-slot').appendChild(pop);
+}
+
+async function keepNode(){
+  const t=tasksOf(currentGoal).find(x=>x.id===selected);
+  const ta=document.getElementById('exit-ta');
+  if(ta && ta.value.trim() && ta.value.trim()!==t.exit_criterion){
+    await api('/node/update',{node:selected,actor:'ladan',fields:{exit_criterion:ta.value.trim()}});
+  }
+  kept[selected]=true; selected=null;
+  await refresh(true);
+}
+async function removeNode(){
+  await api('/node/remove',{node:selected,actor:'ladan'});
+  delete kept[selected]; selected=null;
+  await refresh(true);
+}
+async function approve(){
+  const g=currentGoal;
+  await api('/event',{node:g,to:'working',actor:'ladan',note:'negotiated and approved on the sculpt surface; plan armed, frontier open'});
+  justArmed=true; kept={}; selected=null; currentGoal=null;
+  await refresh(true);
+}
+
+let holdTimer=null;
+function wireHold(enabled){
+  const g=document.getElementById('goal-dot'); if(!g)return;
+  const start=()=>{ if(!enabled)return; holdTimer=setTimeout(approve,650); };
+  const cancel=()=>clearTimeout(holdTimer);
+  g.addEventListener('mousedown',start); g.addEventListener('touchstart',start,{passive:true});
+  g.addEventListener('mouseup',cancel); g.addEventListener('mouseleave',cancel); g.addEventListener('touchend',cancel);
+  g.addEventListener('keydown',e=>{ if(enabled&&e.key==='Enter'){approve();} });
+}
+
+refresh(true);
+setInterval(refresh, 1500);
+</script>
+<script src="../_nav.js"></script>
+</body>
+</html>

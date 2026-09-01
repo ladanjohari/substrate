@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Substrate &middot; Canvas</title>
+<style>
+:root{
+  --text-1: rgba(255,255,255,0.82); --text-2: rgba(255,255,255,0.5);
+  --text-3: rgba(255,255,255,0.28); --text-4: rgba(255,255,255,0.18);
+  --bd-1: rgba(255,255,255,0.13); --bd-2: rgba(255,255,255,0.07);
+  --bg:#0a0a0a; --card: rgba(255,255,255,0.025);
+  --fill-hover: rgba(255,255,255,0.05);
+  --ok:#34C759; --gate:#E8952A; --err:#FF453A;
+  --idle: rgba(255,255,255,0.22); --edge: rgba(255,255,255,0.14); --live:#fff;
+}
+body.lm{
+  --text-1: rgba(0,0,0,0.82); --text-2: rgba(0,0,0,0.52);
+  --text-3: rgba(0,0,0,0.32); --text-4: rgba(0,0,0,0.2);
+  --bd-1: rgba(0,0,0,0.14); --bd-2: rgba(0,0,0,0.08);
+  --bg:#f5f5f4; --card: rgba(0,0,0,0.02); --fill-hover: rgba(0,0,0,0.045);
+  --idle: rgba(0,0,0,0.22); --edge: rgba(0,0,0,0.14); --live:#111;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{background:var(--bg);color:var(--text-1);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden;}
+.hud{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;justify-content:space-between;align-items:flex-start;padding:58px 26px 22px;pointer-events:none;}
+.hud > *{pointer-events:auto;}
+.eyebrow{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:8px;}
+h1{font-size:16px;font-weight:600;letter-spacing:-.01em;}
+.status-line{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text-3);margin-top:8px;}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);}
+.pulse.offline{background:var(--err);}
+select{font-size:11px;color:var(--text-2);background:var(--bg);border:.5px solid var(--bd-1);border-radius:6px;padding:4px 8px;font-family:inherit;min-height:30px;}
+.right{display:flex;gap:8px;align-items:center;}
+.mode-btn{font-size:11px;color:var(--text-2);background:var(--bg);border:.5px solid var(--bd-1);border-radius:20px;padding:6px 13px;cursor:pointer;font-family:inherit;min-height:32px;}
+.zoombar{position:fixed;bottom:22px;left:26px;z-index:10;display:flex;gap:8px;align-items:center;}
+.zbtn{width:34px;height:34px;border-radius:50%;border:.5px solid var(--bd-1);background:var(--bg);color:var(--text-2);font-size:16px;cursor:pointer;font-family:inherit;}
+.zbtn:hover{background:var(--fill-hover);}
+.zlabel{font-size:10.5px;color:var(--text-4);width:110px;}
+.hint{position:fixed;bottom:22px;right:26px;z-index:10;font-size:10.5px;color:var(--text-4);text-align:right;line-height:1.6;}
+#viewport{position:fixed;inset:44px 0 0 0;cursor:grab;touch-action:none;}
+#viewport.dragging{cursor:grabbing;}
+svg text{font-family:inherit;user-select:none;-webkit-user-select:none;}
+</style>
+</head>
+<body data-nav="overlay">
+<div class="hud">
+  <div>
+    <div class="eyebrow">Substrate &middot; Canvas &middot; v0.2</div>
+    <h1 id="goal-title">&hellip;</h1>
+    <div class="status-line"><span class="pulse" id="pulse"></span><span id="status">connecting</span>
+      <select id="goal-picker" aria-label="Choose a goal"></select>
+    </div>
+  </div>
+  <div class="right">
+    <button class="mode-btn" onclick="openNewGoal()">New goal</button>
+    <button class="mode-btn" onclick="document.body.classList.toggle('lm');this.textContent=document.body.classList.contains('lm')?'Dark':'Light'">Light</button>
+  </div>
+</div>
+
+<div id="newgoal" style="display:none;position:fixed;left:50%;top:100px;transform:translateX(-50%);z-index:14;background:var(--bg);border:.5px solid var(--bd-1);border-radius:14px;padding:14px 16px;width:min(520px,92vw);">
+  <div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">Start a new goal</div>
+  <div style="font-size:11px;color:var(--text-3);margin-bottom:10px;">One sentence. It gets broken into tasks with testable exit criteria, then waits for you to approve it. Nothing runs until you do.</div>
+  <input id="goal-sentence" placeholder="Publish my app on the App Store" style="width:100%;font-size:12.5px;color:var(--text-1);background:var(--fill-hover);border:.5px solid var(--bd-1);border-radius:7px;padding:9px 11px;font-family:inherit;margin-bottom:10px;">
+  <div style="display:flex;gap:7px;align-items:center;">
+    <button class="mode-btn" id="goal-go" onclick="submitGoal()">Break it down</button>
+    <button class="mode-btn" onclick="closeNewGoal()">cancel</button>
+    <span id="goal-msg" style="font-size:11px;color:var(--text-3);"></span>
+  </div>
+</div>
+<div id="viewport"></div>
+<div class="zoombar">
+  <button class="zbtn" onclick="zoomBy(0.7)" aria-label="Zoom out">&minus;</button>
+  <button class="zbtn" onclick="zoomBy(1.42)" aria-label="Zoom in">+</button>
+  <span class="zlabel" id="alt-label"></span>
+</div>
+<div class="hint">drag to pan &middot; scroll or pinch to zoom &middot; tap a node to sculpt<br>far = the dot &middot; near = the words</div>
+<script src="../_nav.js"></script>
+
+<div id="sculptbar" style="display:none;position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:12;background:var(--bg);border:.5px solid var(--bd-1);border-radius:14px;padding:12px 16px;min-width:340px;max-width:92vw;">
+  <div id="sb-title" style="font-size:12.5px;font-weight:600;margin-bottom:8px;"></div>
+  <div id="sb-body"></div>
+</div>
+
+<script>
+const STORE='http://localhost:8040';
+let DATA=null, SNAP='', currentGoal=null, sel=[], mergeMode=false;
+window.ACTOR='ladan';
+let cam={x:0,y:0,k:1};
+let vw=innerWidth, vh=innerHeight-44; // 44 = the bar across the top
+
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function api(p){const r=await fetch(STORE+p);return r.json();}
+
+async function refresh(force){
+  try{
+    const t=await api('/tree');
+    document.getElementById('pulse').className='pulse';
+    document.getElementById('status').textContent='reading the store';
+    const goals=t.nodes.filter(n=>!n.parent);
+    const pick=document.getElementById('goal-picker');
+    pick.innerHTML=goals.map(g=>`<option value="${esc(g.id)}" ${g.id===currentGoal?'selected':''}>${esc(g.title)}</option>`).join('');
+    if(!currentGoal) currentGoal=goals[0]?.id;
+    const snap=JSON.stringify(t.nodes.map(n=>[n.id,n.state]))+currentGoal;
+    DATA=t;
+    if(snap!==SNAP||force){SNAP=snap;draw();}
+  }catch(e){
+    document.getElementById('pulse').className='pulse offline';
+    document.getElementById('status').textContent='not running · double-click Open Substrate.command to start it';
+  }
+}
+document.getElementById('goal-picker').addEventListener('change',e=>{currentGoal=e.target.value;fitView();refresh(true);});
+
+const COLW=340, ROWH=150;
+function layout(){
+  const tasks=DATA.nodes.filter(n=>n.parent===currentGoal);
+  const ids=tasks.map(t=>t.id);
+  const edges=DATA.edges.filter(e=>ids.includes(e.blocked)&&ids.includes(e.blocker));
+  const memo={};
+  const d=id=>memo[id]??(memo[id]=(edges.filter(e=>e.blocked===id).length?1+Math.max(...edges.filter(e=>e.blocked===id).map(e=>d(e.blocker))):0));
+  tasks.forEach(t=>d(t.id));
+  const maxD=Math.max(...tasks.map(t=>memo[t.id]),0);
+  const cols=[];for(let k=0;k<=maxD;k++)cols.push(tasks.filter(t=>memo[t.id]===k));
+  const rows=Math.max(...cols.map(c=>c.length),1);
+  const pos={};
+  cols.forEach((col,k)=>col.forEach((t,i)=>{
+    pos[t.id]={x:220+k*COLW, y:(i+0.5-col.length/2)*ROWH*(rows/Math.max(col.length,1)>2?1.4:1)};
+  }));
+  return {tasks,edges,pos,maxD};
+}
+
+function stateColor(s){return s==='done'?'var(--ok)':s==='waiting'?'var(--gate)':s==='error'?'var(--err)':s==='working'?'var(--live)':'var(--idle)';}
+
+function draw(){
+  if(!DATA||!currentGoal)return;
+  const g=DATA.nodes.find(n=>n.id===currentGoal);
+  document.getElementById('goal-title').textContent=g?g.title:'';
+  const {tasks,edges,pos}=layout();
+  const k=cam.k;
+  // altitude opacities: far shows only the goal dot, mid shows branches, near shows words
+  const oBranch=Math.max(0,Math.min(1,(k-0.28)/0.22));
+  const oTitle=Math.max(0,Math.min(1,(k-0.55)/0.3));
+  const oDetail=Math.max(0,Math.min(1,(k-1.35)/0.6));
+  const oGoalLabel=Math.max(0,Math.min(1,(0.5-k)/0.2));
+
+  let s=`<svg width="${vw}" height="${vh}" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Task tree canvas for ${esc(g?g.title:'')}">
+  <g transform="translate(${vw/2+cam.x} ${vh/2+cam.y}) scale(${k})">`;
+  const gx=0, gy=0;
+  const gcol=stateColor(g?g.state:'idle');
+  s+=`<circle cx="${gx}" cy="${gy}" r="${10/Math.sqrt(k)}" fill="${g&&g.state==='done'?'var(--ok)':'none'}" stroke="${gcol}" stroke-width="${1.5/k}"/>`;
+  if(oGoalLabel>0) s+=`<text x="${gx}" y="${gy+34/k}" text-anchor="middle" font-size="${13/k}" fill="var(--text-2)" opacity="${oGoalLabel}">${esc(g?g.title:'')}</text>`;
+
+  if(oBranch>0){
+    s+=`<g opacity="${oBranch}">`;
+    edges.forEach(e=>{
+      const a=pos[e.blocker],b=pos[e.blocked];if(!a||!b)return;
+      const done=DATA.nodes.find(n=>n.id===e.blocker)?.state==='done';
+      const mx=(a.x+b.x)/2;
+      s+=`<path d="M${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}" fill="none" stroke="${done?'var(--ok)':'var(--edge)'}" stroke-width="1.4" opacity="${done?0.5:1}"/>`;
+    });
+    tasks.filter(t=>!edges.some(e=>e.blocked===t.id)).forEach(t=>{
+      const p=pos[t.id],mx=(gx+p.x)/2;
+      s+=`<path d="M${gx+11} ${gy} C ${mx} ${gy}, ${mx} ${p.y}, ${p.x} ${p.y}" fill="none" stroke="var(--edge)" stroke-width="1.4"/>`;
+    });
+    tasks.forEach(t=>{
+      const p=pos[t.id],c=stateColor(t.state);
+      const anim=t.state==='working'?`<animate attributeName="opacity" values="1;0.15;1" dur="1.6s" repeatCount="indefinite"/>`:'';
+      if(sel.includes(t.id)) s+=`<circle cx="${p.x}" cy="${p.y}" r="14" fill="none" stroke="${c}" stroke-width="1.2" opacity="0.6"/>`;
+      s+=`<g class="tap" data-id="${esc(t.id)}" style="cursor:pointer"><circle cx="${p.x}" cy="${p.y}" r="8" fill="${c}">${anim}</circle><circle cx="${p.x}" cy="${p.y}" r="22" fill="transparent"/></g>`;
+      if(oTitle>0){
+        s+=`<g opacity="${oTitle}">
+          <text x="${p.x+18}" y="${p.y-14}" font-size="13" fill="var(--text-1)">${esc(t.title)}</text>
+          <text x="${p.x+18}" y="${p.y+5}" font-size="10.5" fill="${t.state==='done'?'var(--ok)':t.state==='waiting'?'var(--gate)':'var(--text-3)'}">${esc(t.state)}</text></g>`;
+      }
+      if(oDetail>0){
+        const exit=t.exit_criterion.length>90?t.exit_criterion.slice(0,89)+'…':t.exit_criterion;
+        const half=Math.ceil(exit.length/2);
+        let cut=exit.lastIndexOf(' ',half); if(cut<20)cut=half;
+        s+=`<g opacity="${oDetail}">
+          <text x="${p.x+18}" y="${p.y+24}" font-size="9" fill="var(--text-3)">exit: ${esc(exit.slice(0,cut))}</text>
+          <text x="${p.x+18}" y="${p.y+37}" font-size="9" fill="var(--text-3)">${esc(exit.slice(cut).trim())}</text></g>`;
+      }
+    });
+    s+='</g>';
+  }
+  s+='</g></svg>';
+  document.getElementById('viewport').innerHTML=s;
+  document.querySelectorAll('.tap').forEach(el=>{
+    el.addEventListener('click',e=>{e.stopPropagation();tapNode(el.dataset.id);});
+  });
+  const alt=k<0.5?'the dot: goal at a glance':k<1.35?'the branches: shape of the work':'the words: exit criteria';
+  document.getElementById('alt-label').textContent=alt;
+}
+
+// Frame the whole tree, whatever shape it is. This used to assume three
+// columns, so a goal with more tasks than that opened mostly off-screen,
+// with the work sitting low and left in a large field of nothing.
+function fitView(){
+  if(!DATA||!currentGoal){cam={x:0,y:0,k:0.9};return;}
+  const {tasks,pos}=layout();
+  const xs=[0], ys=[0];
+  tasks.forEach(t=>{const p=pos[t.id]; if(p){xs.push(p.x);ys.push(p.y);}});
+  // Wider margin on the left so the goal dot never sits hard against the edge,
+  // and room on the right for the labels, which hang beside each dot.
+  const minX=Math.min(...xs)-150, maxX=Math.max(...xs)+280;
+  const minY=Math.min(...ys)-70, maxY=Math.max(...ys)+70;
+  // Never open below 0.85. Under 0.5 the canvas deliberately shows only the
+  // goal dot, which on first load just reads as an empty screen, and between
+  // 0.5 and 0.85 the task titles are still fading in and hard to read. A big
+  // tree opens slightly cropped and pannable, which beats opening on nothing.
+  const k=Math.max(0.85,Math.min(1.5,Math.min(vw/(maxX-minX),vh/(maxY-minY))*0.9));
+  cam={x:-((minX+maxX)/2)*k, y:-((minY+maxY)/2)*k, k};
+}
+
+// pan + zoom
+const vp=document.getElementById('viewport');
+let drag=null, pointers=new Map();
+vp.addEventListener('pointerdown',e=>{
+  vp.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===1) drag={x:e.clientX,y:e.clientY};
+  vp.classList.add('dragging');
+});
+vp.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId))return;
+  const prev=[...pointers.values()];
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===1&&drag){
+    cam.x+=e.clientX-drag.x; cam.y+=e.clientY-drag.y;
+    drag={x:e.clientX,y:e.clientY};
+    draw();
+  }else if(pointers.size===2){
+    const cur=[...pointers.values()];
+    const d0=Math.hypot(prev[0].x-prev[1].x,prev[0].y-prev[1].y);
+    const d1=Math.hypot(cur[0].x-cur[1].x,cur[0].y-cur[1].y);
+    if(d0>0){
+      const cx=(cur[0].x+cur[1].x)/2,cy=(cur[0].y+cur[1].y)/2;
+      applyZoom(d1/d0,cx,cy);
+    }
+  }
+});
+const endPtr=e=>{pointers.delete(e.pointerId);drag=pointers.size===1?[...pointers.values()][0]:null;if(!pointers.size)vp.classList.remove('dragging');};
+vp.addEventListener('pointerup',endPtr); vp.addEventListener('pointercancel',endPtr);
+vp.addEventListener('wheel',e=>{
+  e.preventDefault();
+  applyZoom(Math.exp(-e.deltaY*0.0016), e.clientX, e.clientY);
+},{passive:false});
+
+function applyZoom(f,cx,cy){
+  const nk=Math.max(0.12,Math.min(5,cam.k*f));
+  const rf=nk/cam.k;
+  const ox=cx-vw/2, oy=cy-vh/2;
+  cam.x=ox-(ox-cam.x)*rf; cam.y=oy-(oy-cam.y)*rf; cam.k=nk;
+  draw();
+}
+function zoomBy(f){applyZoom(f,vw/2,vh/2);}
+
+addEventListener('resize',()=>{vw=innerWidth;vh=innerHeight-44;draw();});
+addEventListener('keydown',e=>{
+  if(e.key==='+'||e.key==='=')zoomBy(1.3);
+  if(e.key==='-')zoomBy(0.77);
+  if(e.key==='ArrowLeft'){cam.x+=60;draw();}
+  if(e.key==='ArrowRight'){cam.x-=60;draw();}
+  if(e.key==='ArrowUp'){cam.y+=60;draw();}
+  if(e.key==='ArrowDown'){cam.y-=60;draw();}
+});
+
+async function post(path,payload){
+  const r=await fetch(STORE+path,{method:'POST',body:JSON.stringify(payload)});
+  return r.json();
+}
+function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,30)||'node';}
+
+function tapNode(id){
+  if(mergeMode){
+    if(!sel.includes(id)) sel.push(id);
+    showSculpt(); draw(); return;
+  }
+  sel=[id]; mergeMode=false; showSculpt(); draw();
+}
+vp.addEventListener('click',()=>{ if(!mergeMode){sel=[];hideSculpt();draw();} });
+
+function hideSculpt(){document.getElementById('sculptbar').style.display='none';}
+function showSculpt(){
+  const bar=document.getElementById('sculptbar');
+  const t=DATA.nodes.find(n=>n.id===sel[0]); if(!t){hideSculpt();return;}
+  bar.style.display='block';
+  if(mergeMode){
+    document.getElementById('sb-title').textContent='Merge: '+sel.length+' branch'+(sel.length>1?'es':'')+' selected';
+    document.getElementById('sb-body').innerHTML=
+      `<div style="font-size:11px;color:var(--text-3);margin-bottom:8px;">tap more nodes to include them, then name the point where they reunite</div>
+       <input id="merge-title" placeholder="Name the merge point" style="width:100%;font-size:12px;color:var(--text-1);background:var(--fill-hover);border:.5px solid var(--bd-1);border-radius:7px;padding:8px 10px;font-family:inherit;margin-bottom:8px;">
+       <div style="display:flex;gap:7px;">
+         <button class="mode-btn" onclick="doMerge()" ${sel.length<2?'disabled':''}>Merge ${sel.length<2?'(pick 2+)':''}</button>
+         <button class="mode-btn" onclick="mergeMode=false;sel=[];hideSculpt();draw()">cancel</button>
+       </div>`;
+  }else{
+    document.getElementById('sb-title').textContent=t.title;
+    const human=/approved by|chosen by|marked as chosen|decides|decision required|sign.?off|human decision|ladan (approves|decides|picks|chooses)/i.test(t.exit_criterion+' '+t.intent);
+    const runnable=t.state==='idle'&&!human;
+    document.getElementById('sb-body').innerHTML=
+      `<div style="font-size:11px;color:var(--text-3);margin-bottom:8px;">${esc(t.state)}${human?' &middot; needs a human, no AI run':''}</div>
+       <div style="display:flex;gap:7px;flex-wrap:wrap;">
+         ${runnable?`<button class="mode-btn" style="color:var(--ok);border-color:var(--ok)" onclick="runNode()">Run with AI</button>`:''}
+         ${t.state==='done'?`<button class="mode-btn" onclick="viewOutput()">View output</button>`:''}
+         <button class="mode-btn" onclick="showFork()">Fork into two</button>
+         <button class="mode-btn" onclick="mergeMode=true;showSculpt()">Merge with&hellip;</button>
+         <button class="mode-btn" onclick="sel=[];hideSculpt();draw()">close</button>
+       </div>`;
+  }
+}
+function showFork(){
+  const t=DATA.nodes.find(n=>n.id===sel[0]);
+  document.getElementById('sb-body').innerHTML=
+    `<div style="font-size:11px;color:var(--text-3);margin-bottom:8px;">two branches will grow out of &ldquo;${esc(t.title)}&rdquo;</div>
+     <input id="fork-a" placeholder="First branch" style="width:100%;font-size:12px;color:var(--text-1);background:var(--fill-hover);border:.5px solid var(--bd-1);border-radius:7px;padding:8px 10px;font-family:inherit;margin-bottom:6px;">
+     <input id="fork-b" placeholder="Second branch" style="width:100%;font-size:12px;color:var(--text-1);background:var(--fill-hover);border:.5px solid var(--bd-1);border-radius:7px;padding:8px 10px;font-family:inherit;margin-bottom:8px;">
+     <div style="display:flex;gap:7px;"><button class="mode-btn" onclick="doFork()">Fork</button>
+     <button class="mode-btn" onclick="showSculpt()">back</button></div>`;
+}
+async function doFork(){
+  const t=DATA.nodes.find(n=>n.id===sel[0]);
+  const a=document.getElementById('fork-a').value.trim()||'Branch one';
+  const b=document.getElementById('fork-b').value.trim()||'Branch two';
+  for(const title of [a,b]){
+    await post('/node/add',{actor:window.ACTOR,id:t.parent+'/'+slug(title)+'-'+Date.now().toString(36).slice(-4),
+      title, parent:t.parent, blocked_by:[t.id],
+      intent:'forked from "'+t.title+'" on the canvas',
+      note:'forked from '+t.id});
+  }
+  sel=[];hideSculpt();SNAP='';await refresh(true);
+}
+async function runNode(){
+  const id=sel[0];
+  await post('/run',{node:id,actor:window.ACTOR});
+  sel=[];hideSculpt();
+  // the worker posts its own events; the poll will show the shimmer, then green
+}
+async function viewOutput(){
+  const id=sel[0];
+  const r=await fetch(STORE+'/output/'+encodeURIComponent(id));
+  const j=await r.json();
+  document.getElementById('sb-title').textContent='Output';
+  document.getElementById('sb-body').innerHTML=
+    `<div style="max-height:44vh;overflow:auto;font-size:11.5px;line-height:1.7;color:var(--text-2);white-space:pre-wrap;border:.5px solid var(--bd-2);border-radius:8px;padding:10px 12px;margin-bottom:8px;">${esc(j.output||j.error)}</div>
+     <button class="mode-btn" onclick="showSculpt()">back</button>`;
+}
+async function doMerge(){
+  const title=document.getElementById('merge-title').value.trim()||'Merge point';
+  const parent=DATA.nodes.find(n=>n.id===sel[0]).parent;
+  await post('/node/add',{actor:window.ACTOR,id:parent+'/'+slug(title)+'-'+Date.now().toString(36).slice(-4),
+    title, parent, blocked_by:[...sel],
+    intent:'merge point created on the canvas; reunites '+sel.length+' branches',
+    note:'merged: '+sel.join(' + ')});
+  mergeMode=false;sel=[];hideSculpt();SNAP='';await refresh(true);
+}
+
+// Typing a goal in used to mean opening a Terminal and knowing a command.
+function openNewGoal(){
+  document.getElementById('newgoal').style.display='block';
+  document.getElementById('goal-msg').textContent='';
+  document.getElementById('goal-sentence').focus();
+}
+function closeNewGoal(){document.getElementById('newgoal').style.display='none';}
+async function submitGoal(){
+  const box=document.getElementById('goal-sentence');
+  const sentence=box.value.trim();
+  const msg=document.getElementById('goal-msg');
+  if(!sentence){msg.textContent='write the goal first';return;}
+  document.getElementById('goal-go').disabled=true;
+  msg.textContent='thinking, this takes about half a minute';
+  const before=new Set(DATA?DATA.nodes.filter(n=>!n.parent).map(n=>n.id):[]);
+  try{
+    const r=await post('/goal/new',{sentence});
+    if(r.error){throw new Error(r.error);}
+    // Watch for the new goal to land, then jump straight to it.
+    const started=Date.now();
+    const poll=setInterval(async()=>{
+      const t=await api('/tree');
+      const fresh=t.nodes.filter(n=>!n.parent&&!before.has(n.id))[0];
+      if(fresh){
+        clearInterval(poll);
+        document.getElementById('goal-go').disabled=false;
+        closeNewGoal(); box.value='';
+        currentGoal=fresh.id; SNAP='';
+        await refresh(true); fitView(); draw();
+      }else if(Date.now()-started>180000){
+        clearInterval(poll);
+        document.getElementById('goal-go').disabled=false;
+        msg.textContent='it is taking longer than expected, check the Terminal window';
+      }
+    },1500);
+  }catch(e){
+    document.getElementById('goal-go').disabled=false;
+    msg.textContent='could not start: '+e.message;
+  }
+}
+addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeNewGoal();
+  if(e.key==='Enter'&&document.activeElement===document.getElementById('goal-sentence'))submitGoal();
+});
+
+refresh(true).then(()=>{fitView();draw();});
+setInterval(refresh,1500);
+</script>
+</body>
+</html>

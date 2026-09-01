@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Substrate &middot; Live Tree</title>
+<style>
+:root{
+  --text-1: rgba(255,255,255,0.82); --text-2: rgba(255,255,255,0.5);
+  --text-3: rgba(255,255,255,0.28); --text-4: rgba(255,255,255,0.18);
+  --bd-1: rgba(255,255,255,0.13); --bd-2: rgba(255,255,255,0.07);
+  --bg:#0a0a0a; --card: rgba(255,255,255,0.025);
+  --fill-hover: rgba(255,255,255,0.05);
+  --ok:#34C759; --gate:#E8952A; --err:#FF453A;
+  --idle: rgba(255,255,255,0.22); --edge: rgba(255,255,255,0.14);
+  --live:#fff;
+}
+body.lm{
+  --text-1: rgba(0,0,0,0.82); --text-2: rgba(0,0,0,0.52);
+  --text-3: rgba(0,0,0,0.32); --text-4: rgba(0,0,0,0.2);
+  --bd-1: rgba(0,0,0,0.14); --bd-2: rgba(0,0,0,0.08);
+  --bg:#f5f5f4; --card: rgba(0,0,0,0.02);
+  --fill-hover: rgba(0,0,0,0.045);
+  --idle: rgba(0,0,0,0.22); --edge: rgba(0,0,0,0.14); --live:#111;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text-1);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:980px;margin:0 auto;padding:56px 28px 80px;}
+.mono{font-family:'SF Mono','Menlo',monospace;}
+.eyebrow{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:12px;}
+h1{font-size:20px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px;}
+.sub{font-size:12.5px;color:var(--text-2);line-height:1.6;}
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;}
+.mode-btn{flex:none;font-size:11px;color:var(--text-2);background:transparent;border:.5px solid var(--bd-1);border-radius:20px;padding:5px 13px;cursor:pointer;font-family:inherit;}
+.mode-btn:hover{background:var(--fill-hover);}
+.status-line{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text-3);margin-top:10px;}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);}
+.pulse.offline{background:var(--err);}
+#canvas{margin-top:26px;}
+svg text{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;}
+.legend{display:flex;gap:18px;margin-top:8px;flex-wrap:wrap;}
+.legend .item{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text-3);}
+.ldot{width:7px;height:7px;border-radius:50%;background:var(--idle);}
+.ldot.ok{background:var(--ok);} .ldot.gate{background:var(--gate);}
+.ldot.working{background:var(--live);animation:shimmer 1.6s ease-in-out infinite;}
+@keyframes shimmer{0%,100%{transform:scale(1);opacity:1;}50%{transform:scale(.35);opacity:.15;}}
+#detail{margin-top:18px;border:.5px solid var(--bd-2);border-radius:12px;background:var(--card);padding:15px 17px;display:none;}
+#detail.show{display:block;animation:popIn .16s ease-out;}
+@keyframes popIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+#detail h2{font-size:13.5px;font-weight:600;margin-bottom:8px;}
+.kv{display:flex;gap:8px;font-size:11.5px;line-height:1.6;margin-top:4px;}
+.kv .k{color:var(--text-4);flex:none;width:96px;text-transform:uppercase;letter-spacing:.05em;font-size:10px;padding-top:1px;}
+.kv .v{color:var(--text-2);}
+.kv .v.exit{color:var(--ok);}
+#history{margin-top:9px;border-top:.5px solid var(--bd-2);padding-top:9px;font-size:11px;line-height:1.9;color:var(--text-3);}
+footer{margin-top:56px;padding-top:18px;border-top:.5px solid var(--bd-2);font-size:11px;color:var(--text-4);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">Substrate &middot; Live tree &middot; Slice D</div>
+      <h1 id="goal-title">&hellip;</h1>
+      <p class="sub" id="goal-sub">Reading the store&hellip;</p>
+      <div class="status-line"><span class="pulse" id="pulse"></span><span id="status">connecting to the store</span>
+        <select id="goal-picker" style="display:none;font-size:11px;color:var(--text-2);background:transparent;border:.5px solid var(--bd-1);border-radius:6px;padding:2px 6px;font-family:inherit;" onchange="currentGoal=this.value;lastPayload='';tick()"></select>
+      </div>
+    </div>
+    <button class="mode-btn" onclick="document.body.classList.toggle('lm');this.textContent=document.body.classList.contains('lm')?'Dark':'Light'">Light</button>
+  </div>
+
+  <div id="canvas"></div>
+
+  <div class="legend">
+    <div class="item"><span class="ldot working"></span> working</div>
+    <div class="item"><span class="ldot gate"></span> waiting for a person</div>
+    <div class="item"><span class="ldot ok"></span> done</div>
+    <div class="item"><span class="ldot"></span> not started</div>
+  </div>
+
+  <div id="detail"></div>
+
+  <footer>
+    <span>Live from the substrate store &middot; click a node for its story</span>
+    <span>Working Document &middot; Not for distribution</span>
+  </footer>
+</div>
+
+<script>
+const STORE = 'http://localhost:8040';
+const COLORS = {
+  done: 'var(--ok)', waiting: 'var(--gate)', error: 'var(--err)',
+  idle: 'var(--idle)', working: 'var(--live)'
+};
+let LOG = [], NODES = {}, selected = null, lastPayload = '';
+
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function depthOf(id, edges, memo){
+  if (memo[id] !== undefined) return memo[id];
+  const blockers = edges.filter(e => e.blocked === id).map(e => e.blocker);
+  memo[id] = blockers.length ? 1 + Math.max(...blockers.map(b => depthOf(b, edges, memo))) : 0;
+  return memo[id];
+}
+
+let currentGoal = null;
+function render(data){
+  const goals = data.nodes.filter(n => !n.parent);
+  if (!currentGoal || !goals.some(g => g.id === currentGoal)) currentGoal = goals[0] && goals[0].id;
+  const goal = goals.find(g => g.id === currentGoal);
+  const tasks = data.nodes.filter(n => n.parent === currentGoal);
+  NODES = {}; data.nodes.forEach(n => NODES[n.id] = n);
+
+  document.getElementById('goal-title').textContent = goal ? goal.title : 'No goal yet';
+  document.getElementById('goal-sub').textContent = goal ? ('exit: ' + goal.exit_criterion.toLowerCase().replace(/\.$/,'')) : '';
+  const picker = document.getElementById('goal-picker');
+  if (goals.length > 1){
+    picker.style.display = 'inline-block';
+    picker.innerHTML = goals.map(g =>
+      `<option value="${esc(g.id)}" ${g.id===currentGoal?'selected':''}>${esc(g.title)}${g.state==='waiting'?' · awaiting approval':''}</option>`).join('');
+  } else picker.style.display = 'none';
+
+  const memo = {};
+  tasks.forEach(t => depthOf(t.id, data.edges, memo));
+  const maxDepth = Math.max(...Object.values(memo));
+  const cols = [];
+  for (let d = 0; d <= maxDepth; d++) cols.push(tasks.filter(t => memo[t.id] === d));
+
+  const W = 920, rowH = 74, PADX = 130;
+  const colGap = (W - PADX - 180) / Math.max(1, maxDepth);
+  const colX = d => PADX + d * colGap;
+  // The invisible rectangle that makes each label clickable must stop short of
+  // the next column. At a fixed width it covered the neighbouring dot and ate
+  // the click, which is what made one task on the negotiate page unselectable.
+  const hitW = Math.max(70, Math.min(240, colGap - 10));
+  const H = Math.max(...cols.map(c => c.length)) * rowH + 120;
+  const pos = {};
+  cols.forEach((col, d) => col.forEach((t, i) => {
+    const total = col.length;
+    pos[t.id] = { x: colX(d), y: 70 + (i + 0.5) * ((H - 110) / total) };
+  }));
+
+  let svg = `<svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+
+  const gx = 46, gy = H / 2;
+  svg += `<text x="${gx}" y="${gy - 22}" font-size="12" fill="var(--text-2)">The goal</text>`;
+  svg += `<circle cx="${gx}" cy="${gy}" r="7" fill="none" stroke="var(--live)" stroke-width="1.5" opacity="0.85"/>`;
+
+  data.edges.forEach(e => {
+    const a = pos[e.blocker], b = pos[e.blocked];
+    if (!a || !b) return;
+    const done = NODES[e.blocker].state === 'done';
+    const mx = (a.x + b.x) / 2;
+    svg += `<path d="M${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}" fill="none" stroke="${done ? 'var(--ok)' : 'var(--edge)'}" stroke-width="1.2" opacity="${done ? 0.55 : 1}"/>`;
+  });
+  cols[0].forEach(t => {
+    const p = pos[t.id];
+    const mx = (gx + p.x) / 2;
+    svg += `<path d="M${gx + 8} ${gy} C ${mx} ${gy}, ${mx} ${p.y}, ${p.x} ${p.y}" fill="none" stroke="var(--edge)" stroke-width="1.2"/>`;
+  });
+
+  tasks.forEach(t => {
+    const p = pos[t.id];
+    const c = COLORS[t.state] || COLORS.idle;
+    const anim = t.state === 'working'
+      ? `<animate attributeName="opacity" values="1;0.15;1" dur="1.6s" repeatCount="indefinite"/>` : '';
+    const sel = selected === t.id
+      ? `<circle cx="${p.x}" cy="${p.y}" r="12" fill="none" stroke="${c}" stroke-width="1" opacity="0.5"/>` : '';
+    svg += `<g style="cursor:pointer" onclick="pick('${t.id}')">${sel}
+      <circle cx="${p.x}" cy="${p.y}" r="7" fill="${c}">${anim}</circle>
+      <text x="${p.x + 16}" y="${p.y + 4}" font-size="12.5" fill="var(--text-1)">${esc(t.title.split(':')[0])}</text>
+      <text x="${p.x + 16}" y="${p.y + 20}" font-size="10.5" fill="var(--text-3)">${esc(t.state)}</text>
+      <rect x="${p.x - 14}" y="${p.y - 26}" width="${hitW}" height="52" fill="transparent"/></g>`;
+  });
+
+  svg += '</svg>';
+  document.getElementById('canvas').innerHTML = svg;
+  if (selected) showDetail(selected);
+}
+
+function pick(id){ selected = id; showDetail(id); }
+
+function showDetail(id){
+  const n = NODES[id]; if (!n) return;
+  const hist = LOG.filter(e => e.node === id).map(e =>
+    `<div><span class="mono">${esc(e.ts.slice(5,16).replace('T',' '))}</span> &middot; ${esc(e.actor)} &middot; ${esc(e.from_state)} &rarr; ${esc(e.to_state)}${e.note ? ': ' + esc(e.note) : ''}</div>`
+  ).join('') || '<div>no events yet</div>';
+  const d = document.getElementById('detail');
+  d.className = 'show';
+  d.innerHTML = `<h2>${esc(n.id)} &middot; ${esc(n.title)}</h2>
+    <div class="kv"><span class="k">Intent</span><span class="v">${esc(n.intent)}</span></div>
+    <div class="kv"><span class="k">Exit criterion</span><span class="v exit">${esc(n.exit_criterion)}</span></div>
+    <div class="kv"><span class="k">State</span><span class="v">${esc(n.state)}${n.owner ? ' &middot; owned by ' + esc(n.owner) : ''}</span></div>
+    <div id="history">${hist}</div>`;
+}
+
+async function tick(){
+  try{
+    const [tRes, lRes] = await Promise.all([fetch(STORE + '/tree'), fetch(STORE + '/log')]);
+    const data = await tRes.json();
+    LOG = await lRes.json();
+    document.getElementById('pulse').className = 'pulse';
+    document.getElementById('status').textContent = 'live &middot; store at localhost:8040'.replace('&middot;','·');
+    const payload = JSON.stringify(data.nodes) + LOG.length;
+    if (payload !== lastPayload){ lastPayload = payload; render(data); }
+  }catch(e){
+    document.getElementById('pulse').className = 'pulse offline';
+    document.getElementById('status').textContent = 'not running · double-click Open Substrate.command to start it';
+  }
+}
+tick();
+setInterval(tick, 1000);
+</script>
+<script src="../_nav.js"></script>
+</body>
+</html>

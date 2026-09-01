@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.db
+*.db.bak*
+store/runner.beat
+store/outputs/
+.DS_Store

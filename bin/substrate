@@ -1,0 +1,3 @@
+#!/bin/sh
+# The substrate, from anywhere: put this on your PATH or run it by full path.
+exec python3 "$(dirname "$0")/../store/substrate_cli.py" "$@"
