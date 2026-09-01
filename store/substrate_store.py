@@ -197,9 +197,12 @@ def append_event(conn, node, to_state, actor, note=None):
             raise ValueError(f"{node} has no exit criteria; add one before closing it")
         open_ = unmet(conn, node)
         if open_:
-            names = "; ".join(f"#{c['id']} {c['text']}" for c in open_)
-            raise ValueError(
-                f"{node} cannot be done: {len(open_)} criterion/criteria still open -> {names}")
+            # One criterion per line. This message is read by a person deciding
+            # what to do next, and a single long line is unreadable.
+            n = len(open_)
+            word = "criterion" if n == 1 else "criteria"
+            names = "".join(f"\n        #{c['id']} {c['text']}" for c in open_)
+            raise ValueError(f"{node} cannot be done: {n} {word} still open{names}")
     conn.execute(
         "INSERT INTO events (ts, actor, node, from_state, to_state, note) VALUES (?,?,?,?,?,?)",
         (now(), actor, node, row["state"], to_state, note),
