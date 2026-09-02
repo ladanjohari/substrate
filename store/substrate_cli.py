@@ -23,6 +23,7 @@ Every command takes --json for agents; the default output is for humans.
   substrate add-criterion <node> TEXT  add a criterion
   substrate meet <criterion-id> -e ""  mark one met, with evidence
   substrate fail <criterion-id> -e ""  mark one failed, with evidence
+  substrate reopen <criterion-id>      take back one ticked off in error
   substrate state <node> <state> -n "" move a node (done needs criteria met)
   substrate log [n]                    the last n events
 
@@ -375,6 +376,16 @@ def cmd_add_criterion(conn, a):
     out(f"added criterion #{cid} to {a.node}", {"criterion": cid}, a.json)
 
 
+def cmd_reopen(conn, a):
+    # A criterion ticked off in error has to be takeable back, or the record
+    # is not truthful. The log keeps the mistake and the correction both:
+    # the trail of a mistake is data.
+    res = store.set_criterion(conn, a.criterion, "unmet", actor(),
+                              a.reason or "reopened; the earlier evidence did not hold")
+    out(f"#{a.criterion} on {res['node']} is open again. The old evidence stays in the log.",
+        res, a.json)
+
+
 def cmd_set_criterion(conn, a, to_state):
     res = store.set_criterion(conn, a.criterion, to_state, actor(), a.evidence)
     tail = ("  all criteria met — this node can now be closed"
@@ -436,6 +447,9 @@ def main():
     s = sub.add_parser("show"); s.add_argument("node")
     s = sub.add_parser("criteria"); s.add_argument("node")
     s = sub.add_parser("add-criterion"); s.add_argument("node"); s.add_argument("text")
+    s = sub.add_parser("reopen", help="take back a criterion ticked off in error")
+    s.add_argument("criterion", type=int)
+    s.add_argument("-e", "--reason", help="why it is being reopened")
     for name in ("meet", "fail"):
         s = sub.add_parser(name)
         s.add_argument("criterion", type=int)
@@ -456,6 +470,7 @@ def main():
         "tree": cmd_tree, "frontier": cmd_frontier, "path": cmd_path, "show": cmd_show,
         "criteria": cmd_criteria, "add-criterion": cmd_add_criterion,
         "state": cmd_state, "log": cmd_log,
+        "reopen": cmd_reopen,
         "meet": lambda c, x: cmd_set_criterion(c, x, "met"),
         "fail": lambda c, x: cmd_set_criterion(c, x, "failed"),
     }

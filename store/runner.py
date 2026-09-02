@@ -71,10 +71,20 @@ def pick():
     frontier = api("/frontier")
     tasks = [nodes[i] for i in frontier if nodes[i].get("parent")]
     if not tasks:
+        # Say what the person has to do, and name it. Reporting an unrelated
+        # unapproved plan while the goal they are watching sits stuck reads
+        # like the wrong answer to the question they are asking.
+        yours = [n for n in tree["nodes"] if n.get("parent") and n["state"] == "waiting"]
+        if yours:
+            names = ", ".join(t["id"].split("/")[-1] for t in yours[:3])
+            more = f" +{len(yours) - 3} more" if len(yours) > 3 else ""
+            return None, (f"nothing left for an agent. {len(yours)} task"
+                          f"{'' if len(yours) == 1 else 's'} need you: "
+                          f"{names}{more}")
         waiting = [n for n in tree["nodes"] if not n.get("parent") and n["state"] == "waiting"]
         if waiting:
-            n = len(waiting)
-            return None, f"{n} plan{'' if n == 1 else 's'} waiting for you to approve"
+            names = ", ".join(n["id"] for n in waiting[:3])
+            return None, f"no approved work. Waiting for your approval: {names}"
         return None, "nothing on the frontier"
     for t in tasks:
         if t.get("runbook"):
@@ -83,8 +93,8 @@ def pick():
             continue
         return t, None
     n = len(tasks)
-    return None, (f"{n} task{'' if n == 1 else 's'} on the frontier, "
-                  f"{'it needs' if n == 1 else 'they all need'} a person")
+    names = ", ".join(t["id"].split("/")[-1] for t in tasks[:3])
+    return None, (f"{n} task{'' if n == 1 else 's'} need a person, not an agent: {names}")
 
 
 def run_one(task, model):
