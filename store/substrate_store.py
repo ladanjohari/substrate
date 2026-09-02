@@ -518,6 +518,56 @@ def remove_node(conn, node, actor, note="removed in negotiation"):
     return removed
 
 
+def call(path, payload=None):
+    """The HTTP API, without the HTTP.
+
+    The runner and the workers used to reach the store over localhost, so
+    nothing could run unless a server was already up in another window. They
+    call this instead: the same paths and the same shapes, straight to the
+    file. The server still exists for the browser pages, and both can be live
+    at once because SQLite does the locking.
+    """
+    import urllib.parse
+    conn = db()
+    if payload is None:
+        if path == "/tree":
+            return tree(conn)
+        if path == "/frontier":
+            return frontier(conn)
+        if path == "/critical-path":
+            return critical_path(conn)
+        if path == "/log":
+            return [dict(r) for r in conn.execute("SELECT * FROM events ORDER BY seq")]
+        if path.startswith("/criteria/"):
+            return criteria_for(conn, urllib.parse.unquote(path[len("/criteria/"):]))
+        if path == "/criteria":
+            return criteria_for(conn)
+        raise ValueError(f"unknown path: {path}")
+    actor = payload.get("actor", "unknown")
+    if path == "/event":
+        append_event(conn, payload["node"], payload["to"], actor, payload.get("note"))
+        return {"ok": True}
+    if path == "/criterion/set":
+        return set_criterion(conn, int(payload["criterion"]), payload["to"],
+                             actor, payload.get("evidence"))
+    if path == "/criterion/add":
+        return {"ok": True, "criterion": add_criterion(conn, payload["node"],
+                                                       payload["text"], actor)}
+    if path == "/node/update":
+        update_node(conn, payload["node"], actor, payload.get("fields", {}))
+        return {"ok": True}
+    if path == "/node/remove":
+        remove_node(conn, payload["node"], actor)
+        return {"ok": True}
+    if path == "/node/add":
+        add_node(conn, actor, payload)
+        return {"ok": True}
+    if path == "/edge/add":
+        add_edge(conn, actor, payload["blocker"], payload["blocked"])
+        return {"ok": True}
+    raise ValueError(f"unknown path: {path}")
+
+
 # Typing a goal in used to mean opening a Terminal. The store now runs the
 # decomposer itself and keeps the in-flight sentences here so a page can say
 # "thinking" instead of looking broken for the half minute the AI call takes.

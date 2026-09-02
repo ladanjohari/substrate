@@ -23,12 +23,14 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import time
-import urllib.request
 from pathlib import Path
 
-STORE = "http://localhost:8040"
-OUT = Path(__file__).parent / "outputs"
+HERE = Path(__file__).parent
+OUT = HERE / "outputs"
+sys.path.insert(0, str(HERE))
+import substrate_store as store  # noqa: E402
 
 PROMPT = """You are a worker agent inside a goal-tracking system. Execute this task and output ONLY the deliverable, no preamble.
 
@@ -59,12 +61,8 @@ Output ONLY a JSON array, no prose: [{{"id": <criterion id>, "met": true|false, 
 
 
 def api(path, payload=None):
-    req = urllib.request.Request(STORE + path)
-    if payload is not None:
-        req.data = json.dumps(payload).encode()
-        req.method = "POST"
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+    # Straight to the database file. No server has to be running first.
+    return store.call(path, payload)
 
 
 def human_task(t):
@@ -146,12 +144,17 @@ def main():
     still_open = [c for c in api(f"/criteria/{task['id']}") if c["state"] != "met"]
 
     if still_open:
+        n = len(still_open)
+        word = "criterion" if n == 1 else "criteria"
         api("/event", {"node": task["id"], "to": "waiting", "actor": args.actor,
                        "note": f"AI-executed in {dt:.0f}s; deliverable at "
-                               f"store/outputs/{outfile.name}. {len(still_open)} criterion/"
-                               f"criteria could not be evidenced, needs a human check"})
-        print(f"executed in {dt:.0f}s -> {outfile}\nwaiting: "
-              + "; ".join(c["text"] for c in still_open))
+                               f"store/outputs/{outfile.name}. {n} {word} could not "
+                               f"be evidenced, so this needs a person"})
+        # Detail first, summary last: the runner echoes the final line.
+        print(f"    executed in {dt:.0f}s, deliverable at {outfile}")
+        for c in still_open:
+            print(f"    still open: {c['text']}")
+        print(f"waiting for a person, {n} {word} could not be evidenced")
         return
 
     api("/event", {"node": task["id"], "to": "done", "actor": args.actor,

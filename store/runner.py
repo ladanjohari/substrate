@@ -32,12 +32,10 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-STORE = "http://localhost:8040"
 HERE = Path(__file__).parent
 BEAT = HERE / "runner.beat"
 IDLE_SLEEP = 6
@@ -49,9 +47,13 @@ HUMAN = re.compile(
     r"sign.?off|human decision|\w+ (approves|decides|picks|chooses)", re.I)
 
 
+sys.path.insert(0, str(HERE))
+import substrate_store as store  # noqa: E402
+
+
 def api(path):
-    with urllib.request.urlopen(STORE + path, timeout=10) as r:
-        return json.loads(r.read())
+    # Straight to the database file. No server has to be running first.
+    return store.call(path)
 
 
 def beat(note, task=None):
@@ -71,7 +73,8 @@ def pick():
     if not tasks:
         waiting = [n for n in tree["nodes"] if not n.get("parent") and n["state"] == "waiting"]
         if waiting:
-            return None, f"{len(waiting)} plan(s) waiting for you to approve"
+            n = len(waiting)
+            return None, f"{n} plan{'' if n == 1 else 's'} waiting for you to approve"
         return None, "nothing on the frontier"
     for t in tasks:
         if t.get("runbook"):
@@ -79,7 +82,9 @@ def pick():
         if HUMAN.search(t["exit_criterion"] + " " + t["intent"]):
             continue
         return t, None
-    return None, f"{len(tasks)} task(s) on the frontier, all need a person"
+    n = len(tasks)
+    return None, (f"{n} task{'' if n == 1 else 's'} on the frontier, "
+                  f"{'it needs' if n == 1 else 'they all need'} a person")
 
 
 def run_one(task, model):
@@ -89,7 +94,8 @@ def run_one(task, model):
         ["python3", str(HERE / "worker_ai.py"), "--task", task["id"], "--model", model],
         capture_output=True, text=True, timeout=900)
     out = (proc.stdout or "").strip().splitlines()
-    print(f"[runner] {task['id']} finished: {out[-1] if out else 'no output'}", flush=True)
+    # The worker ends with its one-line summary, so echo that.
+    print(f"[runner] {task['id']}: {out[-1] if out else 'no output'}", flush=True)
     if proc.returncode != 0:
         print(f"[runner] {(proc.stderr or '').strip()[:300]}", flush=True)
 
@@ -105,9 +111,11 @@ def main():
     while True:
         try:
             task, why = pick()
-        except (urllib.error.URLError, OSError) as e:
-            beat("store not reachable")
-            print(f"[runner] store not reachable: {e}", flush=True)
+        except (sqlite3.Error, OSError) as e:
+            # The database is a file now, not a service, so the only way this
+            # fails is the file itself: locked by a long write, or gone.
+            beat("cannot read the database")
+            print(f"[runner] cannot read the database: {e}", flush=True)
             time.sleep(IDLE_SLEEP)
             continue
 
