@@ -9,6 +9,7 @@ Every command takes --json for agents; the default output is for humans.
   substrate                            the tree (same as substrate tree)
   substrate decompose ["a goal"]       one sentence in, a proposed tree out; asks if you give none
   substrate approve <goal>             let the runner start on a waiting goal
+  substrate run [--once]               an agent takes work, one task at a time
   substrate add <id> TITLE -c ""       create a goal, or a task inside one (goal/task)
   substrate edit <node> -t "" -i ""    change a node's title, intent, or headline criterion
   substrate block <node> --after X     one task waits on another
@@ -165,6 +166,23 @@ def cmd_decompose(conn, a):
         print(f"\nwaiting for you. Read it, reshape it, then: substrate approve {gid}")
 
 
+def cmd_run(conn, a):
+    # The runner is its own program so it can be left going in a window. This
+    # keeps it reachable as one more word after `substrate`, rather than a
+    # python command that breaks the shape of everything else.
+    import subprocess
+    cmd = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "runner.py")]
+    if a.once:
+        cmd.append("--once")
+    if a.model:
+        cmd += ["--model", a.model]
+    try:
+        sys.exit(subprocess.call(cmd))
+    except KeyboardInterrupt:
+        sys.exit("\nstopped")
+
+
 def cmd_approve(conn, a):
     goal = resolve(conn, a.goal)
     row = conn.execute("SELECT state, parent FROM nodes WHERE id=?", (goal,)).fetchone()
@@ -174,8 +192,10 @@ def cmd_approve(conn, a):
         sys.exit(f"{goal} is {row['state']}, only a waiting goal can be approved")
     store.append_event(conn, goal, "working", actor(),
                        a.note or "approved from the command line; the runner may start")
-    out(f"{goal} approved. The runner picks it up when it is running:\n"
-        f"  python3 store/runner.py --once", {"goal": goal, "state": "working"}, a.json)
+    out(f"{goal} approved. To let an agent take the first task:\n"
+        f"  substrate run --once        one task, then stop\n"
+        f"  substrate run               keep going, control-C to stop",
+        {"goal": goal, "state": "working"}, a.json)
 
 
 def order_tasks(tasks, blockers):
@@ -388,6 +408,9 @@ def main():
 
     s = sub.add_parser("decompose", help="one sentence in, a proposed tree out (uses claude once)")
     s.add_argument("sentence", nargs="*", help="leave empty to be asked")
+    s = sub.add_parser("run", help="let an agent work the approved tasks")
+    s.add_argument("--once", action="store_true", help="one task, then stop")
+    s.add_argument("--model", help="which model the agent uses")
     s = sub.add_parser("approve", help="let the runner start on a waiting goal")
     s.add_argument("goal"); s.add_argument("-n", "--note")
     s = sub.add_parser("add", help="create a goal, or a task as goal/slug")
@@ -427,7 +450,7 @@ def main():
         a.cmd, a.goal = "tree", None
     conn = store.db()
     dispatch = {
-        "decompose": cmd_decompose, "approve": cmd_approve,
+        "decompose": cmd_decompose, "approve": cmd_approve, "run": cmd_run,
         "add": cmd_add, "edit": cmd_edit, "block": cmd_block, "unblock": cmd_unblock,
         "remove": cmd_remove,
         "tree": cmd_tree, "frontier": cmd_frontier, "path": cmd_path, "show": cmd_show,

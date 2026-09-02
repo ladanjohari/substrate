@@ -59,6 +59,7 @@ for machine-readable output.
 
 Also there: `decompose "a goal in one sentence"` (a proposed tree with criteria,
 one call to the `claude` command, arrives waiting for approval), `approve <goal>`,
+`run` (let an agent work),
 `frontier` (what may start right now), `show`, `criteria`, `add-criterion`,
 `state`, `log`. Run `./bin/substrate -h` for the full list.
 
@@ -89,9 +90,9 @@ refuses. That refusal is the product.
 ## Letting an agent do the work
 
 ```
-substrate approve <goal>              nothing runs before this
-python3 store/runner.py --once        one agent takes one task
-python3 store/runner.py               keeps going until you stop it
+substrate approve <goal>    nothing runs before this
+substrate run --once        one agent takes one task, then stops
+substrate run               keeps going until you stop it with control-C
 ```
 
 The runner reads the database file directly, so nothing has to be started
