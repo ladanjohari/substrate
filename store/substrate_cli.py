@@ -44,8 +44,52 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import substrate_store as store  # noqa: E402
 
-MARK = {"idle": "·", "working": "▸", "waiting": "?", "error": "!", "done": "✓"}
-CRIT = {"unmet": "☐", "met": "☑", "failed": "☒"}
+def _unicode_ok():
+    if os.environ.get("SUBSTRATE_ASCII"):
+        return False
+    try:
+        "·▸✓☐☑☒".encode(sys.stdout.encoding or "ascii")
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
+GLYPHS = _unicode_ok()
+MARK = ({"idle": "·", "working": "▸", "waiting": "!", "error": "x", "done": "✓"}
+        if GLYPHS else
+        {"idle": ".", "working": ">", "waiting": "!", "error": "x", "done": "v"})
+CRIT = ({"unmet": "☐", "met": "☑", "failed": "☒"}
+        if GLYPHS else {"unmet": "-", "met": "x", "failed": "!"})
+
+# Colour carries the same meaning it carries everywhere else in this project:
+# motion is working, amber means a person is needed, green means done. It is
+# switched off when the output is piped or when NO_COLOR is set, so a script
+# reading this never has to strip escape codes.
+def _colour_on():
+    # Off when piped, so a script never has to strip escape codes. NO_COLOR
+    # turns it off everywhere; SUBSTRATE_COLOR=1 forces it on, which is what
+    # you want when piping into `less -R` or capturing output for a demo.
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("SUBSTRATE_COLOR"):
+        return os.environ["SUBSTRATE_COLOR"] not in ("0", "", "no", "false")
+    return sys.stdout.isatty()
+
+
+COLOUR = _colour_on()
+
+
+def c(text, *styles):
+    if not COLOUR or not styles:
+        return text
+    codes = {"dim": "2", "bold": "1", "green": "32", "amber": "33",
+             "blue": "34", "red": "31", "cyan": "36"}
+    return "\033[" + ";".join(codes[s] for s in styles) + "m" + text + "\033[0m"
+
+
+STATE_STYLE = {"idle": ("dim",), "working": ("blue",), "waiting": ("amber", "bold"),
+               "error": ("red", "bold"), "done": ("green",)}
+CRIT_STYLE = {"unmet": ("dim",), "met": ("green",), "failed": ("red",)}
 
 
 def actor():
@@ -190,7 +234,12 @@ def cmd_approve(conn, a):
     if row["parent"]:
         sys.exit(f"{goal} is a task; approve its goal: {row['parent']}")
     if row["state"] != "waiting":
-        sys.exit(f"{goal} is {row['state']}, only a waiting goal can be approved")
+        if row["state"] in ("idle", "working"):
+            sys.exit(f"{goal} is already open for work, it needs no approval.\n"
+                     f"Approval is for a plan the decomposer proposed."
+                     f"  substrate run --once  to let an agent take a task")
+        sys.exit(f"{goal} is {row['state']}, and only a plan waiting for you "
+                 f"can be approved")
     store.append_event(conn, goal, "working", actor(),
                        a.note or "approved from the command line; the runner may start")
     out(f"{goal} approved. To let an agent take the first task:\n"
@@ -213,14 +262,16 @@ def order_tasks(tasks, blockers):
     return ordered
 
 
-def boxes(n):
+def boxes(n, plain=False):
     """Criteria as a row of boxes: ☑ met, ☒ failed, ☐ still open."""
     cs = n.get("criteria") or []
     if not cs:
         return "no criteria"
     if len(cs) > 8:
         return f"{n['criteria_met']}/{n['criteria_total']}"
-    return "".join(CRIT[c["state"]] for c in cs)
+    if plain:
+        return "".join(CRIT[x["state"]] for x in cs)
+    return "".join(c(CRIT[x["state"]], *CRIT_STYLE[x["state"]]) for x in cs)
 
 
 def width():
@@ -229,16 +280,21 @@ def width():
     return max(60, shutil.get_terminal_size((80, 24)).columns)
 
 
-def why(node, blockers, state, room=None):
+def why(node, blockers, state, room=None, n=None):
     if state == "done":
         return "done"
     if state == "working":
-        return "working now"
+        return "an agent is on it"
     if state == "waiting":
-        return "waiting for you"
+        if n and n.get("criteria_total"):
+            left = n["criteria_total"] - n["criteria_met"]
+            return f"needs you, {left} of {n['criteria_total']} checks left"
+        return "needs you"
     if state == "error":
-        return "error"
+        return "error, look at the log"
     b = [x.split("/")[-1] for x in blockers.get(node, [])]
+    if not b and state == "idle":
+        return "ready for an agent"
     if not b:
         return "ready to start"
     line = "after " + ", ".join(b)
@@ -254,27 +310,84 @@ def why(node, blockers, state, room=None):
     return "after " + (b[0] if len(b[0]) + 6 <= room else b[0][:max(3, room - 7)] + "\u2026")
 
 
+def tally(tasks):
+    """The one line that says where a goal stands."""
+    n = {"done": 0, "waiting": 0, "working": 0, "ready": 0, "blocked": 0}
+    for t in tasks:
+        if t["state"] in ("done", "waiting", "working"):
+            n[t["state"]] += 1
+        elif t.get("_ready"):
+            n["ready"] += 1
+        else:
+            n["blocked"] += 1
+    bits = []
+    if n["waiting"]:
+        bits.append(c(f"{n['waiting']} need you", "amber", "bold"))
+    if n["working"]:
+        bits.append(c(f"{n['working']} running", "blue"))
+    if n["ready"]:
+        bits.append(f"{n['ready']} ready")
+    if n["blocked"]:
+        bits.append(c(f"{n['blocked']} blocked", "dim"))
+    if n["done"]:
+        bits.append(c(f"{n['done']} done", "green"))
+    return "   ".join(bits)
+
+
 def render_goal(g, tasks, blockers):
-    head = f"{MARK[g['state']]} {g['id']}   {g['title']}"
-    if len(head) > width():
-        head = f"{MARK[g['state']]} {g['id']}\n    {g['title']}"
+    title = c(g["title"], "bold")
+    lines = [f"{title}   {c(g['id'], 'dim')}"]
     if g["state"] == "waiting":
-        head += f"\n    not approved yet. To let it run:\n    substrate approve {g['id']}"
+        lines.append(c("  not approved, so nothing runs", "amber", "bold"))
+        lines.append(c(f"  substrate approve {g['id']}", "amber"))
     if not tasks:
-        return [head, "  (no tasks yet)"]
+        lines.append(c("  no tasks yet", "dim"))
+        return lines
     tasks = order_tasks(tasks, blockers)
-    names = [t["id"].split("/")[-1] for t in tasks]
-    w = max(len(x) for x in names)
-    bw = max(len(boxes(t)) for t in tasks)
-    used = 3 + 1 + 1 + 1 + w + 2 + bw + 1        # elbow, marks, name, boxes, gaps
-    room = width() - used
-    lines = [head]
-    for i, t in enumerate(tasks):
-        elbow = "└──" if i == len(tasks) - 1 else "├──"
+    for t in tasks:
+        t["_ready"] = not blockers.get(t["id"]) and t["state"] == "idle"
+    lines.append("  " + tally(tasks))
+    lines.append("")
+    w = max(len(t["id"].split("/")[-1]) for t in tasks)
+    bw = max(len(boxes(t, plain=True)) for t in tasks)
+    room = width() - (2 + 2 + w + 2 + bw + 2)
+    for t in tasks:
+        st = t["state"]
+        mark = c(MARK[st], *STATE_STYLE[st])
         name = t["id"].split("/")[-1]
-        lines.append(f"{elbow} {MARK[t['state']]} {name:<{w}}  {boxes(t):<{bw}} "
-                     f"{why(t['id'], blockers, t['state'], room)}")
+        name_out = c(f"{name:<{w}}", "bold") if st == "waiting" else \
+            (c(f"{name:<{w}}", "dim") if st == "idle" and not t["_ready"] else f"{name:<{w}}")
+        pad = " " * (bw - len(boxes(t, plain=True)))
+        reason = why(t["id"], blockers, st, room, t)
+        rstyle = {"waiting": ("amber", "bold"), "done": ("green",),
+                  "working": ("blue",), "error": ("red", "bold")}.get(st, ("dim",))
+        lines.append(f"  {mark} {name_out}  {boxes(t)}{pad}  {c(reason, *rstyle)}")
     return lines
+
+
+def next_action(conn, goals):
+    """End on the one thing to do next, not on a legend."""
+    needs = [t for g in goals for t in g["tasks"] if t["state"] == "waiting"]
+    unapproved = [g for g in goals if g["state"] == "waiting"]
+    if not needs and unapproved:
+        g = unapproved[0]
+        return [c("Next", "bold") + "  read it, then let it run",
+                "      " + c(f"substrate approve {g['id']}", "amber")]
+    if needs:
+        t = needs[0]["id"].split("/")[-1]
+        word = "task needs" if len(needs) == 1 else "tasks need"
+        return [c("Next", "bold") + f"  {len(needs)} {word} you, starting with {t}",
+                "      " + c(f"substrate show {t}", "amber")
+                + c("     see what is left on it", "dim")]
+    ready = [t for g in goals for t in g["tasks"]
+             if t["state"] == "idle" and t.get("_ready")]
+    if ready:
+        return [c("Next", "bold") + f"  {len(ready)} ready for an agent",
+                "      " + c("substrate run --once", "blue")
+                + c("     one task, then stop", "dim")]
+    if goals and all(t["state"] == "done" for g in goals for t in g["tasks"]):
+        return [c("Every task is done.", "green", "bold")]
+    return []
 
 
 def cmd_tree(conn, a):
@@ -298,9 +411,7 @@ def cmd_tree(conn, a):
         lines += render_goal(g, tasks, blockers) + [""]
         payload.append(dict(g, tasks=tasks))
     if not a.json:
-        lines += [f"{CRIT['unmet']} open   {CRIT['met']} met   {CRIT['failed']} failed",
-                  "substrate show <task>    one task in full",
-                  "substrate remove <task>  delete one"]
+        lines += next_action(conn, payload)
     out("\n".join(lines).rstrip(), payload, a.json)
 
 
@@ -323,23 +434,44 @@ def cmd_path(conn, a):
         if not v["path"]:
             continue
         gstate = conn.execute("SELECT state FROM nodes WHERE id=?", (gid,)).fetchone()["state"]
-        lines.append(f"{gid}   {v['title']}")
-        lines.append(f"the longest chain left: {v['cost']} open criteria")
-        w = max(len(p["id"].split("/")[-1]) for p in v["path"])
-        for i, p in enumerate(v["path"]):
-            elbow = "└──" if i == len(v["path"]) - 1 else "├──"
-            n = p["id"].split("/")[-1]
-            lines.append(f"{elbow} {MARK[p['state']]} {n:<{w}}  {p['open_criteria']} open")
+        lines.append(f"{c(v['title'], 'bold')}   {c(gid, 'dim')}")
+        lines.append("  " + c(f"the longest chain left is {v['cost']} open criteria", "dim"))
+        lines.append("")
+        w = max(len(x["id"].split("/")[-1]) for x in v["path"])
+        for x in v["path"]:
+            st = x["state"]
+            n = x["id"].split("/")[-1]
+            name = c(f"{n:<{w}}", "bold") if st == "waiting" else \
+                (c(f"{n:<{w}}", "dim") if st == "idle" else f"{n:<{w}}")
+            lines.append(f"  {c(MARK[st], *STATE_STYLE[st])} {name}  "
+                         + c(f"{x['open_criteria']} open", "dim"))
+        lines.append("")
         nxt = v["next"]
         if nxt:
-            lines.append(f"start with: {nxt}")
+            lines.append(c("Next", "bold") + "  start here")
+            lines.append("      " + c(f"substrate show {nxt.split('/')[-1]}", "amber"))
         elif gstate == "waiting":
-            lines.append(f"nothing can start: this goal is not approved yet."
-                         f"  substrate approve {gid}")
+            lines.append(c("Next", "bold") + "  nothing can start, this plan is not approved")
+            lines.append("      " + c(f"substrate approve {gid}", "amber"))
         else:
-            lines.append(f"nothing can start: {v['head'].split('/')[-1]} is waiting on a person")
+            h = v["head"].split("/")[-1]
+            lines.append(c("Next", "bold") + f"  nothing can start, {h} is waiting on you")
+            lines.append("      " + c(f"substrate show {h}", "amber"))
         lines.append("")
-    out("\n".join(lines).rstrip() or "every goal is closed", cp, a.json)
+    if not lines:
+        goals = conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE parent IS NULL AND removed=0").fetchone()[0]
+        if not goals:
+            msg = "no goals yet.  substrate decompose  to start one"
+        elif conn.execute("SELECT COUNT(*) FROM criteria c JOIN nodes n ON n.id=c.node"
+                          " WHERE c.state!='met' AND n.removed=0").fetchone()[0]:
+            msg = ("no chain to walk: your goals have no tasks under them yet.\n"
+                   "substrate tree   to see what is there")
+        else:
+            msg = "every criterion is met. Nothing is left."
+        out(msg, cp, a.json)
+        return
+    out("\n".join(lines).rstrip(), cp, a.json)
 
 
 def cmd_show(conn, a):
@@ -350,13 +482,33 @@ def cmd_show(conn, a):
     b = [x["blocker"] for x in conn.execute(
         "SELECT blocker FROM edges WHERE blocked=?", (a.node,))]
     n["blocked_by"] = b
-    human = (f"{MARK[n['state']]} {n['id']}  [{n['state']}]\n"
-             f"  {n['title']}\n  intent: {n['intent']}\n"
-             f"  blocked by: {', '.join(b) or 'nothing'}\n  criteria:\n"
-             + "\n".join(f"    {CRIT[c['state']]} #{c['id']} {c['text']}"
-                         + (f"\n        evidence: {c['evidence']}" if c["evidence"] else "")
-                         for c in n["criteria"]))
-    out(human, n, a.json)
+    st = n["state"]
+    label = {"waiting": "needs you", "done": "done", "working": "an agent is on it",
+             "error": "error", "idle": "not started"}[st]
+    L = [f"{c(MARK[st], *STATE_STYLE[st])} {c(n['title'], 'bold')}   "
+         + c(label, *STATE_STYLE[st]),
+         "  " + c(n["id"], "dim")]
+    if n["intent"]:
+        L += ["", "  " + n["intent"]]
+    if b:
+        L += ["", "  " + c("waits for  ", "dim")
+              + ", ".join(x.split("/")[-1] for x in b)]
+    met = sum(1 for x in n["criteria"] if x["state"] == "met")
+    L += ["", f"  {c('CHECKS', 'dim')}  {met} of {len(n['criteria'])} met"]
+    for x in n["criteria"]:
+        L.append(f"  {c(CRIT[x['state']], *CRIT_STYLE[x['state']])} "
+                 + c(f"#{x['id']}", "dim") + f" {x['text']}")
+        if x["evidence"]:
+            L.append("       " + c("evidence: " + x["evidence"], "dim"))
+    open_ = [x for x in n["criteria"] if x["state"] != "met"]
+    if open_ and st != "done":
+        L += ["", c("Next", "bold") + "  do the work, then record the proof",
+              "      " + c(f"substrate meet {open_[0]['id']} -e \"what shows it is true\"",
+                           "amber")]
+        if len(open_) == 1:
+            L.append("      " + c(f"substrate state {n['id'].split('/')[-1]} done", "dim")
+                     + c("   once that last check is met", "dim"))
+    out("\n".join(L), n, a.json)
 
 
 def cmd_criteria(conn, a):
