@@ -86,6 +86,23 @@ Two rules are enforced by the store, not by convention:
 Try `substrate state repo done` before meeting its criteria and the store
 refuses. That refusal is the product.
 
+## Letting an agent do the work
+
+```
+substrate approve <goal>              nothing runs before this
+python3 store/runner.py --once        one agent takes one task
+python3 store/runner.py               keeps going until you stop it
+```
+
+The runner reads the database file directly, so nothing has to be started
+first. It only touches goals a person approved, and it skips any task whose
+criteria name a person deciding. When an agent finishes, a separate checker
+call marks criteria met only by quoting the evidence. Anything it cannot
+evidence sends the task to `waiting` instead of `done`, for a person to settle.
+
+One agent works one task at a time. Parallel agents belong to the menu bar
+app, described in [PROPOSAL.md](PROPOSAL.md).
+
 ## The Claude skill
 
 `skills/substrate/SKILL.md` teaches a Claude Code session to attach to the
