@@ -9,7 +9,7 @@ Every command takes --json for agents; the default output is for humans.
   substrate                            the tree (same as substrate tree)
   substrate decompose ["a goal"]       one sentence in, a proposed tree out; asks if you give none
   substrate approve <goal>             let the runner start on a waiting goal
-  substrate run [--once]               an agent takes work, one task at a time
+  substrate run [--once] [--agents N]  agents take work, N at a time (default 2)
   substrate add <id> TITLE -c ""       create a goal, or a task inside one (goal/task)
   substrate edit <node> -t "" -i ""    change a node's title, intent, or headline criterion
   substrate block <node> --after X     one task waits on another
@@ -222,6 +222,8 @@ def cmd_run(conn, a):
         cmd.append("--once")
     if a.model:
         cmd += ["--model", a.model]
+    if a.agents:
+        cmd += ["--agents", str(a.agents)]
     try:
         sys.exit(subprocess.call(cmd))
     except KeyboardInterrupt:
@@ -572,7 +574,9 @@ def main():
     s = sub.add_parser("decompose", help="one sentence in, a proposed tree out (uses claude once)")
     s.add_argument("sentence", nargs="*", help="leave empty to be asked")
     s = sub.add_parser("run", help="let an agent work the approved tasks")
-    s.add_argument("--once", action="store_true", help="one task, then stop")
+    s.add_argument("--once", action="store_true", help="one round, then stop")
+    s.add_argument("--agents", type=int,
+                   help="how many tasks to work at the same time (default 2)")
     s.add_argument("--model", help="which model the agent uses")
     s = sub.add_parser("approve", help="let the runner start on a waiting goal")
     s.add_argument("goal"); s.add_argument("-n", "--note")

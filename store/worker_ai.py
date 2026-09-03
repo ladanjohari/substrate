@@ -75,6 +75,8 @@ def main():
     p.add_argument("--task")
     p.add_argument("--auto", action="store_true")
     p.add_argument("--actor", default="worker-ai-1")
+    p.add_argument("--claimed", action="store_true",
+                   help="the runner already claimed this task for me")
     p.add_argument("--model", default="sonnet")
     # What the person wants changed about the last attempt. Without this there
     # was no way to iterate: a result was either accepted or abandoned.
@@ -102,9 +104,14 @@ def main():
     else:
         raise SystemExit("pass --task <id> or --auto")
 
-    print(f"claiming {task['id']}: {task['title']}")
-    api("/event", {"node": task["id"], "to": "working", "actor": args.actor,
-                   "note": "claimed from the frontier (AI worker)"})
+    if args.claimed:
+        # The runner already took it on this agent's behalf.
+        print(f"working {task['id']}: {task['title']}")
+    else:
+        print(f"claiming {task['id']}: {task['title']}")
+        if not api("/claim", {"node": task["id"], "actor": args.actor})["ok"]:
+            print(f"stood down: {task['id']} was taken by someone else")
+            return
 
     prompt = PROMPT.format(
         goal_title=(nodes.get(task.get("parent")) or {}).get("title", "unknown"),

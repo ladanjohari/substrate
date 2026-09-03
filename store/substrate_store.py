@@ -208,6 +208,11 @@ def append_event(conn, node, to_state, actor, note=None):
         (now(), actor, node, row["state"], to_state, note),
     )
     conn.execute("UPDATE nodes SET state=? WHERE id=?", (to_state, node))
+    if to_state != "working":
+        # The owner is who is holding it right now. A task that stopped is held
+        # by nobody, and a stale name there would have the display claiming an
+        # agent is on something it walked away from.
+        conn.execute("UPDATE nodes SET owner=NULL WHERE id=?", (node,))
     conn.commit()
 
 
@@ -455,6 +460,31 @@ def add_node(conn, actor, payload):
     conn.commit()
 
 
+def claim(conn, node, actor):
+    """Take a task for one agent, if nobody else has it.
+
+    The UPDATE carries its own condition, so the check and the write are one
+    step. Two runners racing for the same task both run this; SQLite applies
+    them in some order and exactly one sees a row change. The loser gets False
+    and moves on, instead of both proceeding to do the same work twice.
+    """
+    row = conn.execute("SELECT state FROM nodes WHERE id=? AND removed=0", (node,)).fetchone()
+    if not row:
+        raise ValueError(f"unknown node: {node}")
+    cur = conn.execute(
+        "UPDATE nodes SET state='working', owner=? "
+        "WHERE id=? AND state='idle' AND (owner IS NULL OR owner='')",
+        (actor, node))
+    if not cur.rowcount:
+        conn.commit()
+        return False
+    conn.execute(
+        "INSERT INTO events (ts, actor, node, from_state, to_state, note) VALUES (?,?,?,?,?,?)",
+        (now(), actor, node, row["state"], "working", f"claimed by {actor}"))
+    conn.commit()
+    return True
+
+
 def blockers_of(conn, node, seen=None):
     # Every node that has to finish before this one can start, transitively.
     seen = seen if seen is not None else set()
@@ -547,6 +577,8 @@ def call(path, payload=None):
     if path == "/event":
         append_event(conn, payload["node"], payload["to"], actor, payload.get("note"))
         return {"ok": True}
+    if path == "/claim":
+        return {"ok": claim(conn, payload["node"], actor)}
     if path == "/criterion/set":
         return set_criterion(conn, int(payload["criterion"]), payload["to"],
                              actor, payload.get("evidence"))

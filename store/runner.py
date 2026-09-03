@@ -64,91 +64,135 @@ def beat(note, task=None):
     }))
 
 
-def pick():
-    """The first frontier task an AI can honestly attempt, or a reason why not."""
+def runnable(skip=()):
+    """Every frontier task an AI can honestly attempt, best first.
+
+    Returns a list now rather than one task, because several agents can be
+    working at the same time and each needs its own.
+    """
     tree = api("/tree")
     nodes = {n["id"]: n for n in tree["nodes"]}
     frontier = api("/frontier")
-    tasks = [nodes[i] for i in frontier if nodes[i].get("parent")]
-    if not tasks:
-        # Say what the person has to do, and name it. Reporting an unrelated
-        # unapproved plan while the goal they are watching sits stuck reads
-        # like the wrong answer to the question they are asking.
-        yours = [n for n in tree["nodes"] if n.get("parent") and n["state"] == "waiting"]
-        if yours:
-            names = ", ".join(t["id"].split("/")[-1] for t in yours[:3])
-            more = f" +{len(yours) - 3} more" if len(yours) > 3 else ""
-            return None, (f"nothing left for an agent. {len(yours)} task"
-                          f"{'' if len(yours) == 1 else 's'} need you: "
-                          f"{names}{more}")
-        waiting = [n for n in tree["nodes"] if not n.get("parent") and n["state"] == "waiting"]
-        if waiting:
-            names = ", ".join(n["id"] for n in waiting[:3])
-            return None, f"no approved work. Waiting for your approval: {names}"
-        return None, "nothing on the frontier"
-    for t in tasks:
-        if t.get("runbook"):
-            continue
-        if HUMAN.search(t["exit_criterion"] + " " + t["intent"]):
-            continue
-        return t, None
-    n = len(tasks)
-    names = ", ".join(t["id"].split("/")[-1] for t in tasks[:3])
-    return None, (f"{n} task{'' if n == 1 else 's'} need a person, not an agent: {names}")
+    tasks = [nodes[i] for i in frontier if nodes[i].get("parent") and i not in skip]
+    ok = [t for t in tasks
+          if not t.get("runbook")
+          and not HUMAN.search(t["exit_criterion"] + " " + t["intent"])]
+    return ok, tasks, tree
 
 
-def run_one(task, model):
-    print(f"[runner] taking {task['id']}: {task['title']}", flush=True)
-    beat(f"working on {task['title']}", task["id"])
-    proc = subprocess.run(
-        ["python3", str(HERE / "worker_ai.py"), "--task", task["id"], "--model", model],
-        capture_output=True, text=True, timeout=900)
-    out = (proc.stdout or "").strip().splitlines()
-    # The worker ends with its one-line summary, so echo that.
-    print(f"[runner] {task['id']}: {out[-1] if out else 'no output'}", flush=True)
-    if proc.returncode != 0:
-        print(f"[runner] {(proc.stderr or '').strip()[:300]}", flush=True)
+def why_idle(tasks, tree, busy, lost=0):
+    if busy:
+        return None
+    if lost:
+        # Tried to take work and something else already had it. Saying "needs a
+        # person" here would send the reader to look at a task that is fine.
+        return (f"{lost} task{'' if lost == 1 else 's'} already taken by another "
+                f"runner")
+    if tasks:
+        names = ", ".join(t["id"].split("/")[-1] for t in tasks[:3])
+        n = len(tasks)
+        verb = "needs" if n == 1 else "need"
+        return f"{n} task{'' if n == 1 else 's'} {verb} a person, not an agent: {names}"
+    yours = [n for n in tree["nodes"] if n.get("parent") and n["state"] == "waiting"]
+    if yours:
+        names = ", ".join(t["id"].split("/")[-1] for t in yours[:3])
+        more = f" +{len(yours) - 3} more" if len(yours) > 3 else ""
+        n = len(yours)
+        return (f"nothing left for an agent. {n} task{'' if n == 1 else 's'} "
+                f"need you: {names}{more}")
+    waiting = [n for n in tree["nodes"] if not n.get("parent") and n["state"] == "waiting"]
+    if waiting:
+        return "no approved work. Waiting for your approval: " + ", ".join(
+            n["id"] for n in waiting[:3])
+    return "nothing on the frontier"
+
+
+def start(task, model, agent):
+    """Claim the task for one agent, then run a worker on it in the background."""
+    if not store.call("/claim", {"node": task["id"], "actor": agent})["ok"]:
+        return None                       # somebody else got there first
+    print(f"[{agent}] taking {task['id']}: {task['title']}", flush=True)
+    return subprocess.Popen(
+        ["python3", str(HERE / "worker_ai.py"), "--task", task["id"],
+         "--model", model, "--actor", agent, "--claimed"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def finish(agent, task_id, proc):
+    out, err = proc.communicate()
+    last = (out or "").strip().splitlines()
+    print(f"[{agent}] {task_id}: {last[-1] if last else 'no output'}", flush=True)
+    if proc.returncode != 0 and err:
+        print(f"[{agent}] {err.strip()[:300]}", flush=True)
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--once", action="store_true")
+    p.add_argument("--once", action="store_true", help="one task, then stop")
+    p.add_argument("--agents", type=int, default=2,
+                   help="how many tasks to work at the same time (default 2)")
     p.add_argument("--model", default="sonnet")
     args = p.parse_args()
+    n_agents = max(1, args.agents)
 
-    print("[runner] watching the frontier; approved work gets picked up here", flush=True)
+    print(f"[runner] watching the frontier, up to {n_agents} at a time", flush=True)
+    busy = {}          # agent name -> (task id, Popen)
     last_note = None
+    started_any = False
+
     while True:
+        # Anything that finished gets reported and its agent freed.
+        for agent, (tid, proc) in list(busy.items()):
+            if proc.poll() is not None:
+                finish(agent, tid, proc)
+                busy.pop(agent)
+
         try:
-            task, why = pick()
+            free = [f"agent {i + 1}" for i in range(n_agents)
+                    if f"agent {i + 1}" not in busy]
+            ok, all_tasks, tree = runnable(skip={t for t, _ in busy.values()})
         except (sqlite3.Error, OSError) as e:
-            # The database is a file now, not a service, so the only way this
-            # fails is the file itself: locked by a long write, or gone.
             beat("cannot read the database")
             print(f"[runner] cannot read the database: {e}", flush=True)
             time.sleep(IDLE_SLEEP)
             continue
 
-        if task:
-            run_one(task, args.model)
+        # --once means one round of work, not one task: fill every free agent,
+        # let them all finish, then stop. Stopping after the first start would
+        # make the flag mean something different when several agents exist.
+        lost = 0
+        for task in ok:
+            if not free:
+                break
+            agent = free.pop(0)
+            proc = start(task, args.model, agent)
+            if proc:
+                busy[agent] = (task["id"], proc)
+                started_any = True
+            else:
+                lost += 1
+                free.insert(0, agent)        # that agent is still free
+
+        if busy:
+            names = ", ".join(t.split("/")[-1] for t, _ in busy.values())
+            beat(f"{len(busy)} running: {names}", list(busy.values())[0][0])
             last_note = None
-            if args.once:
-                beat("stopped after one task")
-                return
+            time.sleep(1)
             continue
 
-        beat(why)
-        if why != last_note:
-            print(f"[runner] idle: {why}", flush=True)
-            last_note = why
+        if args.once and started_any:
+            beat("stopped after one round")
+            return
+
+        note = why_idle(all_tasks, tree, busy, lost)
+        beat(note)
+        if note != last_note:
+            print(f"[runner] idle: {note}", flush=True)
+            last_note = note
         if args.once:
             return
         time.sleep(IDLE_SLEEP)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        beat("stopped")
-        sys.exit(0)
+    main()

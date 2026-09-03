@@ -90,9 +90,10 @@ refuses. That refusal is the product.
 ## Letting an agent do the work
 
 ```
-substrate approve <goal>    nothing runs before this
-substrate run --once        one agent takes one task, then stops
-substrate run               keeps going until you stop it with control-C
+substrate approve <goal>       nothing runs before this
+substrate run --once           one round of work, then stop
+substrate run                  keeps going until you stop it with control-C
+substrate run --agents 4       four tasks at the same time (default is 2)
 ```
 
 The runner reads the database file directly, so nothing has to be started
@@ -101,8 +102,11 @@ criteria name a person deciding. When an agent finishes, a separate checker
 call marks criteria met only by quoting the evidence. Anything it cannot
 evidence sends the task to `waiting` instead of `done`, for a person to settle.
 
-One agent works one task at a time. Parallel agents belong to the menu bar
-app, described in [PROPOSAL.md](PROPOSAL.md).
+Several agents work at once, each on its own task, and each task records which
+agent is holding it. Taking a task is a single conditional write, so two agents
+racing for the same one cannot both get it: exactly one wins and the other moves
+on. A task that stops being worked releases its agent, so the record never shows
+somebody on something they walked away from.
 
 ## The Claude skill
 
