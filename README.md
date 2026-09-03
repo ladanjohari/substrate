@@ -112,6 +112,26 @@ racing for the same one cannot both get it: exactly one wins and the other moves
 on. A task that stops being worked releases its agent, so the record never shows
 somebody on something they walked away from.
 
+## For an app on top
+
+An app that watches this does not want the whole tree on every poll, and it
+should not have to work out what matters for itself, or that logic ends up in
+two places and drifts. One endpoint answers the question a menu bar actually
+asks:
+
+```
+GET /panel
+```
+
+It returns what needs a person (with the exact checks still open), what is
+running right now (with which agent holds it and for how long), the counts, and
+the dots for the status item already ordered, with anything needing a person
+ahead of anything merely busy. The rest of the API is there too: `/tree`,
+`/frontier`, `/critical-path`, `/criteria/<node>`, `/log`, and the writes
+`/event`, `/claim`, `/criterion/set`.
+
+Start the service with `python3 store/substrate_store.py serve 8040`.
+
 ## The Claude skill
 
 `skills/substrate/SKILL.md` teaches a Claude Code session to attach to the

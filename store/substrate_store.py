@@ -21,6 +21,8 @@ API:
   GET  /log             the append-only event log
   GET  /frontier        nodes whose blockers are all done and state is idle
   GET  /critical-path   the longest remaining chain of open criteria per goal
+  GET  /panel           one poll for a menu bar: what needs a person, what is
+                        running, the counts, and the dots for the pill
   GET  /criteria/<node> the exit criteria of one node, with state and evidence
   POST /event           {"node": id, "to": state, "actor": who,
                          "note": evidence}  -> appends event, updates state
@@ -574,6 +576,86 @@ def remove_node(conn, node, actor, note="removed in negotiation"):
     return removed
 
 
+def _elapsed(conn, node):
+    """How long the current agent has held this task, already formatted."""
+    row = conn.execute(
+        "SELECT ts FROM events WHERE node=? AND to_state='working'"
+        " ORDER BY seq DESC LIMIT 1", (node,)).fetchone()
+    if not row:
+        return None
+    started = datetime.fromisoformat(row["ts"])
+    secs = int((datetime.now(timezone.utc) - started).total_seconds())
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    return f"{secs // 3600}h {(secs % 3600) // 60}m"
+
+
+def panel(conn):
+    """Everything one poll of the menu bar needs, in a single call.
+
+    The app should not have to fetch the tree and then work out what matters;
+    that logic would then live in two places and drift. This answers the panel's
+    actual question, what needs me and what is running, and hands over the dots
+    for the pill already ordered.
+    """
+    t = tree(conn)
+    nodes = {n["id"]: n for n in t["nodes"]}
+    tasks = [n for n in t["nodes"] if n["parent"]]
+    goals = [n for n in t["nodes"] if not n["parent"]]
+
+    has_open_kids = {n["parent"] for n in t["nodes"]
+                     if n["parent"] and n["state"] != "done"}
+    blocked_by = {}
+    for e in t["edges"]:
+        if nodes.get(e["blocker"], {}).get("state") != "done":
+            blocked_by.setdefault(e["blocked"], []).append(e["blocker"])
+
+    def slim(n, extra=None):
+        out = {"id": n["id"], "title": n["title"], "goal": root_goal(conn, n["id"]),
+               "state": n["state"], "owner": n["owner"],
+               "met": n["criteria_met"], "total": n["criteria_total"],
+               "depth": n["id"].count("/") - 1}
+        return {**out, **(extra or {})}
+
+    needs_you = []
+    for n in (x for x in tasks if x["state"] == "waiting"):
+        open_ = [c["text"] for c in (n["criteria"] or []) if c["state"] != "met"]
+        needs_you.append(slim(n, {"open_criteria": open_}))
+
+    running = [slim(n, {"elapsed": _elapsed(conn, n["id"])})
+               for n in tasks if n["state"] == "working"]
+
+    ready = [n["id"] for n in tasks
+             if n["state"] == "idle" and n["id"] not in has_open_kids
+             and not blocked_by.get(n["id"])]
+
+    counts = {
+        "needs_you": len(needs_you), "running": len(running),
+        "ready": len(ready),
+        "done": sum(1 for n in tasks if n["state"] == "done"),
+        "blocked": sum(1 for n in tasks if n["state"] == "idle"
+                       and (n["id"] in has_open_kids or blocked_by.get(n["id"]))),
+        "unapproved_goals": sum(1 for g in goals if g["state"] == "waiting"),
+    }
+
+    # The pill compresses the quiet, never the actionable: anything needing a
+    # person is shown before anything that is merely busy, and the overflow
+    # count is what falls off the end.
+    order = ([("needs", n["id"]) for n in needs_you]
+             + [("working", n["id"]) for n in running]
+             + [("error", n["id"]) for n in tasks if n["state"] == "error"]
+             + [("done", n["id"]) for n in tasks if n["state"] == "done"])
+    dots = [k for k, _ in order[:4]] or (["hollow"] if not tasks else ["idle"])
+    return {
+        "as_of": now(),
+        "goals": [{"id": g["id"], "title": g["title"], "state": g["state"]} for g in goals],
+        "needs_you": needs_you, "running": running, "counts": counts,
+        "pill": {"dots": dots, "overflow": max(0, len(order) - 4)},
+    }
+
+
 def call(path, payload=None):
     """The HTTP API, without the HTTP.
 
@@ -592,6 +674,8 @@ def call(path, payload=None):
             return frontier(conn)
         if path == "/critical-path":
             return critical_path(conn)
+        if path == "/panel":
+            return panel(conn)
         if path == "/log":
             return [dict(r) for r in conn.execute("SELECT * FROM events ORDER BY seq")]
         if path.startswith("/criteria/"):
@@ -734,6 +818,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(frontier(conn))
         elif self.path == "/critical-path":
             self._send(critical_path(conn))
+        elif self.path == "/panel":
+            self._send(panel(conn))
         else:
             self._send({"error": "unknown path"}, 404)
 
