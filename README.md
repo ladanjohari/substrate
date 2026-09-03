@@ -53,8 +53,12 @@ so that command has to be installed and logged in.
 | Recalculate the critical path | `substrate path` |
 | Show the state of the tree | `substrate tree` |
 
-A goal's id is a short slug. A task's id is `goal/slug`. Inside a goal you can
-use the short name anywhere a task is expected. Add `--json` before any command
+A goal's id is a short slug. A task's id is `goal/slug`, and a task can have
+tasks of its own: `goal/task/subtask`, as deep as the work goes. Inside a goal
+you can use the short name anywhere a task is expected.
+
+A task with unfinished parts is not workable itself, because its parts are how
+it gets done. Agents take the parts; the parent closes when they are all done. Add `--json` before any command
 for machine-readable output.
 
 Also there: `decompose "a goal in one sentence"` (a proposed tree with criteria,

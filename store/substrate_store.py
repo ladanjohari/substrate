@@ -350,7 +350,8 @@ def critical_path(conn):
     for gid, g in nodes.items():
         if g["parent"]:
             continue
-        kids = [nid for nid, n in pending.items() if n["parent"] == gid]
+        kids = [nid for nid, n in pending.items()
+                if n["parent"] and root_goal(conn, nid) == gid]
         if not kids:
             out[gid] = {"title": g["title"], "cost": 0, "path": [], "next": None}
             continue
@@ -369,20 +370,45 @@ def critical_path(conn):
     return out
 
 
+def root_goal(conn, node):
+    """Walk up to the goal this node belongs to, however deep it sits."""
+    seen = set()
+    while node and node not in seen:
+        seen.add(node)
+        row = conn.execute("SELECT parent FROM nodes WHERE id=?", (node,)).fetchone()
+        if not row or not row["parent"]:
+            return node
+        node = row["parent"]
+    return node
+
+
 def frontier(conn):
     # A task reaches the frontier only when (1) it is idle, (2) every blocker
     # is done, and (3) its goal is not still awaiting negotiation - approval
     # is what arms a plan.
     rows = conn.execute("""
-        SELECT n.id FROM nodes n
-        LEFT JOIN nodes g ON g.id=n.parent
+        SELECT n.id, n.parent FROM nodes n
         WHERE n.state='idle' AND n.removed=0
-          AND (n.parent IS NULL OR g.state != 'waiting')
           AND NOT EXISTS (
             SELECT 1 FROM edges e JOIN nodes b ON b.id=e.blocker
             WHERE e.blocked=n.id AND b.removed=0 AND b.state != 'done')
+          -- A task with unfinished parts is not workable itself. Its parts are
+          -- how it gets done, so an agent takes those instead.
+          AND NOT EXISTS (
+            SELECT 1 FROM nodes k
+            WHERE k.parent=n.id AND k.removed=0 AND k.state != 'done')
     """).fetchall()
-    return [r["id"] for r in rows]
+    out = []
+    for r in rows:
+        # Approval arms the whole branch, and the approval lives on the goal at
+        # the top, which may be several levels above a subtask.
+        if not r["parent"]:
+            out.append(r["id"]); continue
+        g = conn.execute("SELECT state FROM nodes WHERE id=?",
+                         (root_goal(conn, r["id"]),)).fetchone()
+        if g and g["state"] != "waiting":
+            out.append(r["id"])
+    return out
 
 
 def update_node(conn, node, actor, fields):

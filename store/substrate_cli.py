@@ -128,12 +128,14 @@ def resolve(conn, ref, goal=None):
 
 def cmd_add(conn, a):
     nid = a.id.strip()
-    if not nid or any(ch.isspace() for ch in nid) or nid.count("/") > 1:
+    if not nid or any(ch.isspace() for ch in nid):
         sys.exit("an id is a short slug like 'ship-cli', or goal/slug for a task")
-    parent = nid.split("/")[0] if "/" in nid else None
+    # Any depth: goal, goal/task, goal/task/subtask, and so on. The parent is
+    # everything before the last slash and it has to exist already.
+    parent = nid.rsplit("/", 1)[0] if "/" in nid else None
     if parent and not conn.execute(
-            "SELECT 1 FROM nodes WHERE id=? AND removed=0 AND parent IS NULL", (parent,)).fetchone():
-        sys.exit(f"no such goal: {parent}   (create it first: substrate add {parent} \"...\" -c \"...\")")
+            "SELECT 1 FROM nodes WHERE id=? AND removed=0", (parent,)).fetchone():
+        sys.exit(f"no such parent: {parent}   (create it first)")
     criteria = [c.strip() for c in a.criterion if c.strip()]
     if not criteria:
         sys.exit("a node needs at least one exit criterion (-c \"what a stranger could check\")")
@@ -186,7 +188,8 @@ def cmd_unblock(conn, a):
 def cmd_remove(conn, a):
     node = resolve(conn, a.node)
     gone = store.remove_node(conn, node, actor())
-    extra = f" and its {len(gone) - 1} tasks" if len(gone) > 1 else ""
+    n = len(gone) - 1
+    extra = f" and its {n} task{'' if n == 1 else 's'}" if n else ""
     out(f"removed {node}{extra}", {"removed": gone}, a.json)
 
 
@@ -265,7 +268,7 @@ def order_tasks(tasks, blockers):
 
 
 def boxes(n, plain=False):
-    """Criteria as a row of boxes: ☑ met, ☒ failed, ☐ still open."""
+    """Criteria as a row of boxes: met, failed, still open."""
     cs = n.get("criteria") or []
     if not cs:
         return "no criteria"
@@ -282,7 +285,7 @@ def width():
     return max(60, shutil.get_terminal_size((80, 24)).columns)
 
 
-def why(node, blockers, state, room=None, n=None):
+def why(node, blockers, state, room=None, n=None, has_kids=False):
     if state == "done":
         return "done"
     if state == "working":
@@ -296,14 +299,13 @@ def why(node, blockers, state, room=None, n=None):
         return "error, look at the log"
     b = [x.split("/")[-1] for x in blockers.get(node, [])]
     if not b and state == "idle":
-        return "ready for an agent"
+        # A task with parts is not worked directly; its parts are how it gets done.
+        return "its parts first" if has_kids else "ready for an agent"
     if not b:
-        return "ready to start"
+        return ""
     line = "after " + ", ".join(b)
     if room is None or len(line) <= room:
         return line
-    # Too long for the window: name the first one and count the rest, and if
-    # even that will not fit, cut the name rather than print a bare number.
     if len(b) > 1:
         short = f"after {b[0]} +{len(b) - 1} more"
         if len(short) <= room:
@@ -313,7 +315,7 @@ def why(node, blockers, state, room=None, n=None):
 
 
 def tally(tasks):
-    """The one line that says where a goal stands."""
+    """The one line that says where a goal stands. Counts every level."""
     n = {"done": 0, "waiting": 0, "working": 0, "ready": 0, "blocked": 0}
     for t in tasks:
         if t["state"] in ("done", "waiting", "working"):
@@ -336,34 +338,50 @@ def tally(tasks):
     return "   ".join(bits)
 
 
-def render_goal(g, tasks, blockers):
+def render_goal(g, kids_of, blockers, open_blockers=None):
+    """Draw a goal and everything under it, at any depth."""
     title = c(g["title"], "bold")
     lines = [f"{title}   {c(g['id'], 'dim')}"]
     if g["state"] == "waiting":
         lines.append(c("  not approved, so nothing runs", "amber", "bold"))
         lines.append(c(f"  substrate approve {g['id']}", "amber"))
-    if not tasks:
+
+    open_blockers = blockers if open_blockers is None else open_blockers
+    flat = []
+    def walk(parent, depth):
+        for t in order_tasks(kids_of.get(parent, []), blockers):
+            t["_depth"] = depth
+            t["_kids"] = bool(kids_of.get(t["id"]))
+            t["_ready"] = (not open_blockers.get(t["id"]) and t["state"] == "idle"
+                           and not t["_kids"])
+            flat.append(t)
+            walk(t["id"], depth + 1)
+    walk(g["id"], 0)
+
+    if not flat:
         lines.append(c("  no tasks yet", "dim"))
         return lines
-    tasks = order_tasks(tasks, blockers)
-    for t in tasks:
-        t["_ready"] = not blockers.get(t["id"]) and t["state"] == "idle"
-    lines.append("  " + tally(tasks))
+    lines.append("  " + tally(flat))
     lines.append("")
-    w = max(len(t["id"].split("/")[-1]) for t in tasks)
-    bw = max(len(boxes(t, plain=True)) for t in tasks)
+
+    # The marker indents with its name, or the shape of the tree is lost: a
+    # column of dots down the left edge says everything sits at one level.
+    w = max(len(t["id"].split("/")[-1]) + t["_depth"] * 2 for t in flat)
+    bw = max(len(boxes(t, plain=True)) for t in flat)
     room = width() - (2 + 2 + w + 2 + bw + 2)
-    for t in tasks:
-        st = t["state"]
-        mark = c(MARK[st], *STATE_STYLE[st])
+    for t in flat:
+        st, d = t["state"], t["_depth"]
         name = t["id"].split("/")[-1]
-        name_out = c(f"{name:<{w}}", "bold") if st == "waiting" else \
-            (c(f"{name:<{w}}", "dim") if st == "idle" and not t["_ready"] else f"{name:<{w}}")
-        pad = " " * (bw - len(boxes(t, plain=True)))
-        reason = why(t["id"], blockers, st, room, t)
+        cell = name.ljust(w - d * 2)
+        mark = c(MARK[st], *STATE_STYLE[st])
+        name_out = c(cell, "bold") if st == "waiting" else \
+            (c(cell, "dim") if st == "idle" and not t["_ready"] else cell)
+        bpad = " " * (bw - len(boxes(t, plain=True)))
+        reason = why(t["id"], open_blockers, st, room, t, t["_kids"])
         rstyle = {"waiting": ("amber", "bold"), "done": ("green",),
                   "working": ("blue",), "error": ("red", "bold")}.get(st, ("dim",))
-        lines.append(f"  {mark} {name_out}  {boxes(t)}{pad}  {c(reason, *rstyle)}")
+        lines.append(f"  {'  ' * d}{mark} {name_out}  {boxes(t)}{bpad}  "
+                     f"{c(reason, *rstyle)}")
     return lines
 
 
@@ -381,12 +399,11 @@ def next_action(conn, goals):
         return [c("Next", "bold") + f"  {len(needs)} {word} you, starting with {t}",
                 "      " + c(f"substrate show {t}", "amber")
                 + c("     see what is left on it", "dim")]
-    ready = [t for g in goals for t in g["tasks"]
-             if t["state"] == "idle" and t.get("_ready")]
+    ready = [t for g in goals for t in g["tasks"] if t.get("_ready")]
     if ready:
         return [c("Next", "bold") + f"  {len(ready)} ready for an agent",
                 "      " + c("substrate run --once", "blue")
-                + c("     one task, then stop", "dim")]
+                + c("     one round, then stop", "dim")]
     if goals and all(t["state"] == "done" for g in goals for t in g["tasks"]):
         return [c("Every task is done.", "green", "bold")]
     return []
@@ -404,14 +421,23 @@ def cmd_tree(conn, a):
         goals = [g for g in goals if g["id"] == a.goal]
         if not goals:
             sys.exit(f"no such goal: {a.goal}")
-    blockers = {}
+    state_of = {n["id"]: n["state"] for n in t["nodes"]}
+    blockers, open_blockers = {}, {}
     for e in t["edges"]:
         blockers.setdefault(e["blocked"], []).append(e["blocker"])
+        # A blocker that is done is no longer a reason to wait. Saying "after
+        # format" when format finished sends you to look at nothing.
+        if state_of.get(e["blocker"]) != "done":
+            open_blockers.setdefault(e["blocked"], []).append(e["blocker"])
+    kids_of = {}
+    for n in t["nodes"]:
+        if n["parent"]:
+            kids_of.setdefault(n["parent"], []).append(n)
     lines, payload = [], []
     for g in goals:
-        tasks = [n for n in t["nodes"] if n["parent"] == g["id"]]
-        lines += render_goal(g, tasks, blockers) + [""]
-        payload.append(dict(g, tasks=tasks))
+        lines += render_goal(g, kids_of, blockers, open_blockers) + [""]
+        payload.append(dict(g, tasks=[n for n in t["nodes"]
+                                      if n["parent"] and n["id"].startswith(g["id"] + "/")]))
     if not a.json:
         lines += next_action(conn, payload)
     out("\n".join(lines).rstrip(), payload, a.json)
