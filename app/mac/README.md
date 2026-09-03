@@ -11,11 +11,13 @@ swift build
 .build/debug/SubstrateBar
 ```
 
-It polls `http://127.0.0.1:8040/panel` once a second, so start the store first:
+That is all of it. The app polls `http://127.0.0.1:8040/panel` once a second,
+and if nothing answers there it starts the store itself and stops it again when
+you quit. A menu bar app that makes you open a Terminal and run a Python server
+first is not a Mac app, it is a Python server with an icon.
 
-```
-python3 store/substrate_store.py serve 8040
-```
+If a store is already running, in a window you can see, the app leaves it alone
+and only uses it.
 
 ## Checking it without the interface
 

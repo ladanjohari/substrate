@@ -98,6 +98,7 @@ if args.contains("--print") {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let store = Store()
+    private let storeProcess = StoreProcess()
     private let popover = NSPopover()
     private var pill: NSHostingView<PillView>!
     private var outsideClick: Any?
@@ -134,6 +135,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] _ in self?.fit() }
         fit()
         store.start()
+
+        // If nothing answers on the port after a moment, start the store
+        // ourselves rather than sitting there offline.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.store.offline else { return }
+            self.storeProcess.startIfNeeded()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        storeProcess.stopIfOurs()
     }
 
     private func fit() {
