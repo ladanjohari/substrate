@@ -37,7 +37,7 @@ Your goal, in one sentence: Plan and host a small dinner for eight friends next 
 ```
 
 Half a minute later the proposed tree is on screen: tasks, what waits on what,
-three checkable criteria per task, and the goal in `waiting`. Nothing runs
+the checks each task has to pass, and the goal in `waiting`. Nothing runs
 until `substrate approve <goal>`. This step calls the `claude` command once,
 so that command has to be installed and logged in.
 
