@@ -38,7 +38,7 @@ Produce ONLY a JSON object, no other text, with this exact shape:
     {{"id": "<slug>", "title": "<short imperative>",
       "intent": "<what this piece is for>",
       "exit_criterion": "<one testable sentence, the headline>",
-      "criteria": ["<each separately checkable condition, 1 to 3 of them>"],
+      "criteria": ["<each separately checkable condition, 1 to 5 of them>"],
       "blocked_by": ["<task ids that must finish first, [] if none>"]}}
   ]
 }}
