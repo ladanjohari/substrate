@@ -13,13 +13,13 @@ func demoPanel() -> Panel {
                          state: "waiting", owner: nil, met: 0, total: 2, depth: 1,
                          open_criteria: ["Every role is listed with company, title and dates",
                                          "No claim the source notes do not support"],
-                         elapsed: nil)]
+                         open_ids: [4, 5], elapsed: nil)]
     p.running = [.init(id: "resume/exp/bullets", title: "Draft each bullet", goal: "resume",
                        state: "working", owner: "agent 1", met: 1, total: 3, depth: 1,
-                       open_criteria: nil, elapsed: "2m"),
+                       open_criteria: nil, open_ids: nil, elapsed: "2m"),
                  .init(id: "resume/education", title: "Write the education section",
                        goal: "resume", state: "working", owner: "agent 2", met: 0, total: 3,
-                       depth: 0, open_criteria: nil, elapsed: "1m")]
+                       depth: 0, open_criteria: nil, open_ids: nil, elapsed: "1m")]
     p.counts = .init(needs_you: 1, running: 2, ready: 1, done: 2, blocked: 2,
                      unapproved_goals: 0)
     p.pill = .init(dots: ["needs", "working", "working", "done"], overflow: 3)
@@ -155,9 +155,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openTree() {
-        // Until the window exists, the browser pages are the full tree.
-        NSWorkspace.shared.open(
-            URL(string: "http://localhost:8004/prototypes/live-tree/live-tree.html")!)
+        // Until the window exists, the browser pages are the full tree. They
+        // are served by a second little server, so start that too rather than
+        // opening an address nothing is listening on.
+        storeProcess.startPagesIfNeeded()
+        let url = URL(string: "http://localhost:8004/prototypes/live-tree/live-tree.html")!
+        // Give it a moment to bind the port, or the browser lands on an error.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            NSWorkspace.shared.open(url)
+        }
         close()
     }
 
@@ -168,7 +174,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func show() {
         guard let button = statusItem.button else { return }
         store.poll()
+        // Without this the panel is placed as though it belonged to whatever
+        // app is in front, and lands well below the menu bar.
+        NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
+        popover.contentViewController?.view.window?.makeKey()
         outsideClick = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                 Task { @MainActor in self?.close() }

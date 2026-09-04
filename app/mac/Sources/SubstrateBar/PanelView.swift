@@ -14,6 +14,10 @@ struct PanelView: View {
     private static let sidePad: CGFloat = 5
     private static let contentPad: CGFloat = 11
 
+    @State private var expanded: Int?
+    @State private var evidence: [Int: String] = [:]
+    @State private var lastError: String?
+
     private var p: Panel { store.panel }
     private var rows: Int { p.needs_you.count * 3 + p.running.count }
 
@@ -97,9 +101,10 @@ struct PanelView: View {
         return bits.joined(separator: ", ")
     }
 
-    /// A task that stopped and needs a person, with the checks it could not prove.
+    /// A task that stopped and needs a person, with the checks it could not
+    /// prove. Each one can be closed here, with the evidence that closes it.
     private func question(_ item: Panel.Item) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 DotView(dot: .needs)
                 Text(item.title).font(.system(size: 13, weight: .semibold))
@@ -109,13 +114,21 @@ struct PanelView: View {
                     .font(.system(size: 11)).monospacedDigit()
                     .foregroundStyle(Dot.needs.color.opacity(0.9))
             }
-            ForEach(item.open_criteria ?? [], id: \.self) { text in
-                HStack(alignment: .top, spacing: 7) {
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .strokeBorder(.secondary, lineWidth: 1)
-                        .frame(width: 10, height: 10).padding(.top, 2)
-                    Text(text).font(.system(size: 12)).foregroundStyle(.secondary)
-                }
+
+            let texts = item.open_criteria ?? []
+            let ids = item.open_ids ?? []
+            ForEach(Array(texts.enumerated()), id: \.offset) { i, text in
+                check(id: i < ids.count ? ids[i] : nil, text: text)
+            }
+
+            if let e = lastError {
+                // The store explains its refusals in words. Show its words.
+                Text(e).font(.system(size: 11)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if (item.open_criteria ?? []).isEmpty {
+                Button("Close this task") { close(item) }
+                    .font(.system(size: 12)).controlSize(.small)
             }
         }
         .padding(10)
@@ -123,6 +136,54 @@ struct PanelView: View {
         .overlay(RoundedRectangle(cornerRadius: 8)
             .strokeBorder(Dot.needs.color.opacity(0.4), lineWidth: 0.5))
         .padding(.horizontal, Self.sidePad).padding(.vertical, 5)
+    }
+
+    /// One open check: what it says, and what would show it is true.
+    private func check(id: Int?, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 7) {
+                RoundedRectangle(cornerRadius: 2.5)
+                    .strokeBorder(.secondary, lineWidth: 1)
+                    .frame(width: 10, height: 10).padding(.top, 2)
+                Text(text).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let id, expanded == id {
+                HStack(spacing: 6) {
+                    TextField("what shows it is true", text: binding(for: id))
+                        .textFieldStyle(.roundedBorder).font(.system(size: 12))
+                        .onSubmit { meet(id) }
+                    Button("Met") { meet(id) }
+                        .font(.system(size: 12)).controlSize(.small)
+                        .disabled(evidence[id, default: ""]
+                            .trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding(.leading, 17)
+            } else if let id {
+                Button("I did this") { expanded = id }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.leading, 17)
+            }
+        }
+    }
+
+    private func binding(for id: Int) -> Binding<String> {
+        Binding(get: { evidence[id, default: ""] }, set: { evidence[id] = $0 })
+    }
+
+    private func meet(_ id: Int) {
+        let text = evidence[id, default: ""]
+        store.meet(criterion: id, evidence: text) { problem in
+            if let problem { lastError = problem } else {
+                evidence[id] = nil; expanded = nil; lastError = nil
+            }
+        }
+    }
+
+    private func close(_ item: Panel.Item) {
+        store.markDone(node: item.id) { problem in lastError = problem }
     }
 
     private func group(_ title: String) -> some View {

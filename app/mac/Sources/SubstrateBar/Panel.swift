@@ -29,6 +29,7 @@ struct Panel: Decodable, Equatable {
         let total: Int
         let depth: Int
         var open_criteria: [String]?
+        var open_ids: [Int]?
         var elapsed: String?
     }
 
@@ -89,4 +90,49 @@ final class Store: ObservableObject {
     /// Only used by the render modes, so the design can be reviewed without a
     /// store running.
     func loadDemo(_ p: Panel) { stop(); panel = p; offline = false }
+
+    // MARK: - writing back
+
+    /// Mark one check met, with the evidence that shows it.
+    ///
+    /// The store refuses this without evidence, which is the rule the whole
+    /// thing rests on, so the panel refuses too rather than sending a request
+    /// it knows will bounce.
+    func meet(criterion: Int, evidence: String, then: @escaping (String?) -> Void) {
+        let text = evidence.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return then("Say what shows it is true.") }
+        post("/criterion/set",
+             ["criterion": criterion, "to": "met", "evidence": text, "actor": "you"], then)
+    }
+
+    /// Close a task. The store refuses while any check is still open.
+    func markDone(node: String, then: @escaping (String?) -> Void) {
+        post("/event", ["node": node, "to": "done", "actor": "you",
+                        "note": "closed from the menu bar"], then)
+    }
+
+    private func post(_ path: String, _ body: [String: Any],
+                      _ then: @escaping (String?) -> Void) {
+        var r = URLRequest(url: url.deletingLastPathComponent()
+            .appendingPathComponent(String(path.dropFirst())))
+        r.httpMethod = "POST"
+        r.timeoutInterval = 5
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: r) { [weak self] data, response, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if let error { return then(error.localizedDescription) }
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if code >= 400 {
+                    // The store explains its refusals in words; show its words,
+                    // not a status code.
+                    let why = (try? JSONSerialization.jsonObject(with: data ?? Data()))
+                        .flatMap { ($0 as? [String: Any])?["error"] as? String }
+                    return then(why ?? "the store refused that")
+                }
+                self.poll()
+                then(nil)
+            }
+        }.resume()
+    }
 }

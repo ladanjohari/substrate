@@ -54,7 +54,18 @@ never the thing that gets folded into the count: the pill compresses the quiet,
 never the actionable. That ordering is decided in the store, not here, so the
 command line and the app cannot disagree.
 
+## Closing a check from the panel
+
+A task that stopped shows the checks it could not prove. Press "I did this",
+say what shows it is true, and the check closes. The store refuses a check
+without evidence, so the panel refuses too rather than sending a request it
+knows will bounce, and when the store does refuse something its own words are
+what you see.
+
+That is the difference between a display and a tool: the panel can move work,
+not only report on it.
+
 ## What is not built yet
 
-The full tree window. "Open the full tree" opens the browser page for now.
-Answering a question from inside the panel is next.
+The full tree window. "Open the full tree" starts the page server and opens the
+browser view for now.

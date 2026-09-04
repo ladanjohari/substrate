@@ -9,6 +9,7 @@ import Foundation
 @MainActor
 final class StoreProcess {
     private var child: Process?
+    private var pages: Process?
     private var signals: [DispatchSourceSignal] = []
 
     /// Walks up from the running binary to the repo, looking for the store.
@@ -21,6 +22,29 @@ final class StoreProcess {
             dir = dir.deletingLastPathComponent()
         }
         return nil
+    }
+
+    /// The browser pages are served by a second small server. Nothing starts it
+    /// until something asks for a page, so the common case costs nothing.
+    func startPagesIfNeeded(port: Int = 8004) {
+        guard pages == nil, let store = Self.find() else { return }
+        let script = store.deletingLastPathComponent().appendingPathComponent("pages.py")
+        guard FileManager.default.fileExists(atPath: script.path) else { return }
+        pages = run(script, args: [String(port)])
+        if pages != nil { watchForTermination() }
+    }
+
+    private func run(_ script: URL, args: [String]) -> Process? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        p.arguments = ["python3", script.path] + args
+        p.currentDirectoryURL = script.deletingLastPathComponent().deletingLastPathComponent()
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do { try p.run(); return p } catch {
+            print("could not start \(script.lastPathComponent): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     func startIfNeeded(port: Int = 8040) {
@@ -62,7 +86,7 @@ final class StoreProcess {
     /// Only stops what this app started. A store someone else is running, in a
     /// window they can see, is not ours to kill.
     func stopIfOurs() {
-        child?.terminate()
-        child = nil
+        child?.terminate();  child = nil
+        pages?.terminate();  pages = nil
     }
 }

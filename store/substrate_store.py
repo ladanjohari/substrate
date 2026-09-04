@@ -621,8 +621,11 @@ def panel(conn):
 
     needs_you = []
     for n in (x for x in tasks if x["state"] == "waiting"):
-        open_ = [c["text"] for c in (n["criteria"] or []) if c["state"] != "met"]
-        needs_you.append(slim(n, {"open_criteria": open_}))
+        open_ = [c for c in (n["criteria"] or []) if c["state"] != "met"]
+        # Ids as well as text: an app that can only show the checks is a
+        # display. One that can close them is a tool.
+        needs_you.append(slim(n, {"open_criteria": [c["text"] for c in open_],
+                                  "open_ids": [c["id"] for c in open_]}))
 
     running = [slim(n, {"elapsed": _elapsed(conn, n["id"])})
                for n in tasks if n["state"] == "working"]
