@@ -54,6 +54,15 @@ never the thing that gets folded into the count: the pill compresses the quiet,
 never the actionable. That ordering is decided in the store, not here, so the
 command line and the app cannot disagree.
 
+## Dragging it off the menu bar
+
+The panel is a transient popover, so it closes when you look at something else. That is right
+for a glance and wrong for anything that takes thought, because it vanishes the moment you
+consult the thing you are describing.
+
+So drag it off. It becomes an ordinary window with the same content, and it stays. This is
+AppKit's own gesture, `popoverShouldDetach`, and the window is built for you.
+
 ## Closing a check from the panel
 
 A task that stopped shows the checks it could not prove. Press "I did this",

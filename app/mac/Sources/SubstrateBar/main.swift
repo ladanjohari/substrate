@@ -124,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popover.behavior = .transient
+        popover.delegate = self
         popover.contentViewController = NSHostingController(
             rootView: PanelView(store: store,
                                 onOpenTree: { [weak self] in self?.openTree() },
@@ -191,7 +192,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidResignActive(_ notification: Notification) {
-        if popover.isShown { close() }
+        // A detached panel is a window of its own and must not be dismissed
+        // just because you clicked another app.
+        if popover.isShown && !popover.isDetached { close() }
+    }
+}
+
+extension AppDelegate: NSPopoverDelegate {
+    /// Let the panel be dragged off the menu bar into a real window.
+    ///
+    /// This is the platform's own answer to the tension in a menu bar app: a
+    /// transient popover is right for a glance and wrong for anything that
+    /// takes thought, because it vanishes the moment you look at the thing you
+    /// are describing. Dragging it off turns the glance into a window, and the
+    /// split between looking and working becomes a gesture rather than a rule.
+    ///
+    /// AppKit builds the window itself from the same content view controller,
+    /// which is why there is nothing else to implement here. Apple's own note
+    /// says returning true and letting it do that is preferred over supplying
+    /// a custom window.
+    func popoverShouldDetach(_ popover: NSPopover) -> Bool { true }
+
+    func popoverDidDetach(_ popover: NSPopover) {
+        // Nothing is watching for outside clicks any more; the window handles
+        // its own life now.
+        if let m = outsideClick { NSEvent.removeMonitor(m); outsideClick = nil }
     }
 }
 
