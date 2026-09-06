@@ -50,6 +50,18 @@ func demoPlan() -> Panel {
     return p
 }
 
+/// The half minute between typing a goal and having a plan, and the state
+/// where that half minute produced nothing.
+@MainActor
+func demoThinking(failed: Bool) -> Panel {
+    var p = Panel()
+    p.thinking = [.init(id: "1", sentence: "Write my resume",
+                        state: failed ? "failed" : "thinking",
+                        error: failed ? "the claude command could not run: Failed to authenticate. If it says authenticate: open a terminal, run `claude`, log in, try again" : nil)]
+    p.pill = .init(dots: [failed ? "error" : "working"], overflow: 0)
+    return p
+}
+
 /// `--render-pill out.png` and `--render-panel out.png` draw the interface on
 /// its own at high magnification. A menu bar item is 22 points tall, which is
 /// too small to review on a screenshot, and squinting is not a design process.
@@ -86,6 +98,8 @@ if let i = args.firstIndex(of: "--render-panel"), i + 1 < args.count {
     MainActor.assumeIsolated {
         let store = Store()
         store.loadDemo(args.contains("--empty") ? Panel()
+                       : args.contains("--thinking") ? demoThinking(failed: false)
+                       : args.contains("--failed") ? demoThinking(failed: true)
                        : args.contains("--plan") ? demoPlan() : demoPanel())
         render(PanelView(store: store, onOpenTree: {}, onQuit: {}),
                to: args[i + 1], scale: 2, dark: args.contains("--dark"))
@@ -127,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private var pill: NSHostingView<PillView>!
     private var outsideClick: Any?
+    private var previewWindow: NSWindow?
     private var sizeObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -167,6 +182,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self, self.store.offline else { return }
             self.storeProcess.startIfNeeded()
+        }
+
+        // In preview mode put the same panel in an ordinary window as well.
+        // A text field cannot be drawn by ImageRenderer, so the only honest
+        // picture of one is a screenshot of the thing actually running, and a
+        // popover closes the moment anything else takes focus.
+        if args.contains("--preview") {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 368, height: 260),
+                             styleMask: [.titled, .closable], backing: .buffered,
+                             defer: false)
+            w.title = "Substrate (preview)"
+            w.contentView = NSHostingView(
+                rootView: PanelView(store: store, onOpenTree: {},
+                                    onQuit: { NSApp.terminate(nil) }))
+            w.center()
+            w.makeKeyAndOrderFront(nil)
+            previewWindow = w
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 

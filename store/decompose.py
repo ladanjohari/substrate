@@ -67,10 +67,16 @@ def api(path, payload=None):
 
 
 def think(goal_sentence):
-    out = subprocess.run(
-        ["claude", "-p", PROMPT.format(goal=goal_sentence), "--model", "sonnet"],
-        capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
-    )
+    try:
+        out = subprocess.run(
+            ["claude", "-p", PROMPT.format(goal=goal_sentence), "--model", "sonnet"],
+            capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        # Without this the caller gets a Python traceback, which tells a
+        # person nothing about what to do next.
+        sys.exit("the claude command is not installed, so there is nothing to "
+                 "turn the sentence into a plan")
     if out.returncode != 0 or "Failed to authenticate" in out.stdout:
         # The CLI prints a login failure on stdout with a zero exit code, so
         # check both, and say what to do rather than showing an empty error.

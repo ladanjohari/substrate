@@ -17,6 +17,10 @@ struct PanelView: View {
     @State private var expanded: Int?
     @State private var evidence: [Int: String] = [:]
     @State private var lastError: String?
+    @State private var composing = false
+    @State private var sentence = ""
+    @State private var goalError: String?
+    @FocusState private var goalField: Bool
 
     private var p: Panel { store.panel }
     private var rows: Int { p.needs_you.count * 3 + p.running.count }
@@ -29,6 +33,10 @@ struct PanelView: View {
             if store.offline {
                 message("The store is not running",
                         "Start it with: python3 store/substrate_store.py serve 8040")
+            } else if let bad = p.thinking.first(where: { $0.failed }) {
+                didNotPlan(bad)
+            } else if let busy = p.thinking.first {
+                working(busy)
             } else if p.goals.isEmpty {
                 message("Nothing on the go",
                         "Describe something you want done and it becomes a plan you can approve.")
@@ -50,6 +58,8 @@ struct PanelView: View {
             } else {
                 content
             }
+
+            if canCompose && showField { composer }
 
             Divider().opacity(0.5)
             footer
@@ -73,6 +83,8 @@ struct PanelView: View {
     /// The one line of state, in the order a person cares about it.
     private var summary: String {
         let c = p.counts
+        if p.thinking.contains(where: { $0.failed }) { return "could not plan it" }
+        if !p.thinking.isEmpty { return "working it out" }
         if c.needs_you > 0 { return "\(c.needs_you) needs you" }
         if c.running > 0 { return "\(c.running) running" }
         if c.unapproved_goals > 0 { return "not approved yet" }
@@ -111,6 +123,90 @@ struct PanelView: View {
         return bits.joined(separator: ", ")
     }
 
+    // MARK: - starting a goal
+
+    /// A field is only offered when it is the useful thing to do. During the
+    /// half minute of thinking, and while a plan is waiting to be approved,
+    /// there is exactly one thing to attend to and typing is not it.
+    private var canCompose: Bool { p.thinking.isEmpty && p.proposed.isEmpty }
+
+    /// Open when there is nothing else on the go, because then typing a goal
+    /// is the only thing the panel is for.
+    private var showField: Bool { composing || p.goals.isEmpty }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                TextField("What do you want done?", text: $sentence)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 12))
+                    .focused($goalField)
+                    .onSubmit { startGoal() }
+                Button("Plan it") { startGoal() }
+                    .controlSize(.small)
+                    .disabled(sentence.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if let e = goalError {
+                Text(e).font(.system(size: 11)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, Self.contentPad).padding(.top, 8).padding(.bottom, 2)
+        // With nothing on the go the field is the only thing to do, so put the
+        // cursor in it rather than making you click it first.
+        .onAppear { if p.goals.isEmpty { goalField = true } }
+    }
+
+    private func startGoal() {
+        store.newGoal(sentence: sentence) { problem in
+            if let problem { goalError = problem } else {
+                sentence = ""; composing = false; goalError = nil
+            }
+        }
+    }
+
+    /// The half minute between a sentence and a plan. Saying nothing here
+    /// would look like the app had ignored you.
+    private func working(_ t: Panel.Thinking) -> some View {
+        VStack(spacing: 7) {
+            ProgressView().controlSize(.small)
+            Text("Working out the plan").font(.system(size: 13, weight: .medium))
+            Text(t.sentence).font(.system(size: 12)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("One AI call, about half a minute.")
+                .font(.system(size: 11)).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 14).padding(.vertical, 16)
+    }
+
+    /// It failed, so say what it said. The sentence is kept, because retyping
+    /// it is a punishment for the model's mistake.
+    private func didNotPlan(_ t: Panel.Thinking) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("That did not turn into a plan")
+                .font(.system(size: 13, weight: .semibold))
+            Text(t.error ?? "The decomposer gave no reason.")
+                .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Leave it") { store.forget(thinking: t.id) }.controlSize(.small)
+                Button("Try again") {
+                    sentence = t.sentence
+                    composing = true
+                    store.forget(thinking: t.id)
+                }
+                .controlSize(.small).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Dot.error.color.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .strokeBorder(Dot.error.color.opacity(0.4), lineWidth: 0.5))
+        .padding(.horizontal, Self.sidePad).padding(.vertical, 5)
+    }
+
     /// The plan, before anything has run. Read it, then release it.
     private func plan(_ g: Panel.Proposed) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -119,14 +215,24 @@ struct PanelView: View {
                 .padding(.horizontal, Self.contentPad).padding(.bottom, 8)
 
             ForEach(g.tasks) { t in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(t.title).font(.system(size: 13)).lineLimit(2)
-                    Spacer(minLength: 8)
-                    Text(t.after?.isEmpty == false
-                         ? "after \(t.after!.joined(separator: ", "))"
-                         : "\(t.total) check\(t.total == 1 ? "" : "s")")
-                        .font(.system(size: 11)).foregroundStyle(.tertiary)
-                        .fixedSize()
+                // What the task is called gets the line to itself. Sharing it
+                // with the list of things the task waits on truncated the
+                // names, and a plan whose tasks read "Book the..." is not a
+                // plan anyone can approve.
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(t.title).font(.system(size: 13)).lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Text("\(t.total) check\(t.total == 1 ? "" : "s")")
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                            .fixedSize()
+                    }
+                    if let after = t.after, !after.isEmpty {
+                        Text("after " + after.joined(separator: ", "))
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
                 }
                 .padding(.horizontal, Self.contentPad).padding(.vertical, 4)
             }
@@ -265,8 +371,14 @@ struct PanelView: View {
     }
 
     private var footer: some View {
-        HStack {
-            action("Open the full tree", tint: Color.accentColor, run: onOpenTree)
+        HStack(spacing: 13) {
+            if canCompose && !showField {
+                action("New goal", tint: Color.accentColor) {
+                    composing = true
+                    goalField = true
+                }
+            }
+            action("Open the full tree", tint: Color.secondary, run: onOpenTree)
             Spacer()
             action("Quit", tint: Color.secondary, run: onQuit)
         }

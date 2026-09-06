@@ -11,6 +11,7 @@ struct Panel: Decodable, Equatable {
     var needs_you: [Item] = []
     var running: [Item] = []
     var proposed: [Proposed] = []
+    var thinking: [Thinking] = []
     var counts: Counts = Counts()
     var pill: Pill = Pill()
 
@@ -42,6 +43,17 @@ struct Panel: Decodable, Equatable {
         let id: String
         let title: String
         let tasks: [Item]
+    }
+
+    /// A sentence that has been typed but is not a plan yet. One AI call
+    /// stands between the two and takes about half a minute, so the wait is
+    /// something the panel shows rather than something it hides.
+    struct Thinking: Decodable, Equatable, Identifiable {
+        let id: String
+        let sentence: String
+        let state: String
+        let error: String?
+        var failed: Bool { state == "failed" }
     }
 
     struct Counts: Decodable, Equatable {
@@ -123,6 +135,22 @@ final class Store: ObservableObject {
     func approve(goal: String, then: @escaping (String?) -> Void) {
         post("/approve", ["goal": goal, "actor": "you",
                           "note": "approved from the menu bar"], then)
+    }
+
+    /// Turn a sentence into a proposed plan.
+    ///
+    /// This returns as soon as the store has taken the sentence, not when the
+    /// plan exists. The wait then arrives on the next poll, as `thinking`, so
+    /// one slow AI call cannot freeze the panel.
+    func newGoal(sentence: String, then: @escaping (String?) -> Void) {
+        let text = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return then("Say what you want done.") }
+        post("/goal/new", ["sentence": text, "actor": "you"], then)
+    }
+
+    /// Drop a failed attempt once you have read why it failed.
+    func forget(thinking id: String) {
+        post("/goal/forget", ["id": id, "actor": "you"]) { _ in }
     }
 
     /// Close a task. The store refuses while any check is still open.

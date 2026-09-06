@@ -37,6 +37,7 @@ than asserted.
 
 import json
 import os
+import re
 import sqlite3
 import sys
 import traceback
@@ -661,6 +662,24 @@ def panel(conn):
     # A goal nobody has approved is a plan waiting to be read. The panel needs
     # the tasks themselves, not just a count, because approving without seeing
     # what you are approving is exactly the thing this gate exists to prevent.
+    def in_run_order(kids):
+        # Read the plan in the order it will run: nothing appears above the
+        # thing it waits on. Sorted by name it reads as nonsense, and a plan
+        # you cannot read is a plan you cannot approve.
+        left = {n["id"]: n for n in sorted(kids, key=lambda n: n["id"])}
+        out, placed = [], set()
+        while left:
+            ready = [n for n in left.values()
+                     if all(b in placed or b not in left
+                            for b in blocked_by.get(n["id"], []))]
+            if not ready:  # a cycle, which cannot happen; show them anyway
+                ready = list(left.values())
+            for n in ready:
+                out.append(n)
+                placed.add(n["id"])
+                left.pop(n["id"])
+        return out
+
     proposed = []
     for g in (x for x in goals if x["state"] == "waiting"):
         kids = [n for n in tasks if root_goal(conn, n["id"]) == g["id"]]
@@ -668,8 +687,15 @@ def panel(conn):
             "id": g["id"], "title": g["title"],
             "tasks": [dict(slim(n), after=[b.split("/")[-1]
                                            for b in blocked_by.get(n["id"], [])])
-                      for n in sorted(kids, key=lambda n: n["id"])],
+                      for n in in_run_order(kids)],
         })
+
+    # A goal typed in is not a plan yet: one AI call stands between them, and
+    # it takes about half a minute. The panel carries that half minute so the
+    # app can say "working it out" instead of looking like it did nothing.
+    thinking = sorted((t for t in THINKING.values()
+                       if t["state"] in ("thinking", "failed")),
+                      key=lambda t: t["id"])
 
     counts = {
         "needs_you": len(needs_you), "running": len(running),
@@ -684,6 +710,8 @@ def panel(conn):
     # person is shown before anything that is merely busy, and the overflow
     # count is what falls off the end.
     order = ([("needs", n["id"]) for n in needs_you]
+             + [("error", t["id"]) for t in thinking if t["state"] == "failed"]
+             + [("working", t["id"]) for t in thinking if t["state"] == "thinking"]
              + [("working", n["id"]) for n in running]
              + [("error", n["id"]) for n in tasks if n["state"] == "error"]
              + [("done", n["id"]) for n in tasks if n["state"] == "done"])
@@ -692,6 +720,7 @@ def panel(conn):
         "as_of": now(),
         "goals": [{"id": g["id"], "title": g["title"], "state": g["state"]} for g in goals],
         "needs_you": needs_you, "running": running, "proposed": proposed,
+        "thinking": thinking,
         "counts": counts,
         "pill": {"dots": dots, "overflow": max(0, len(order) - 4)},
     }
@@ -767,19 +796,37 @@ def start_decompose(sentence):
     if not sentence:
         raise ValueError("a goal needs a sentence")
     key = str(int(datetime.now(timezone.utc).timestamp() * 1000))
-    THINKING[key] = {"sentence": sentence, "state": "thinking", "error": None}
+    THINKING[key] = {"id": key, "sentence": sentence, "state": "thinking",
+                     "error": None, "goal": None}
 
     def run():
-        proc = sp.run(["python3", str(Path(__file__).parent / "decompose.py"), sentence],
-                      capture_output=True, text=True, timeout=300)
-        if proc.returncode == 0:
-            THINKING[key]["state"] = "done"
-        else:
-            THINKING[key]["state"] = "failed"
-            THINKING[key]["error"] = (proc.stderr or proc.stdout or "").strip()[-400:]
+        try:
+            proc = sp.run(["python3", str(Path(__file__).parent / "decompose.py"), sentence],
+                          capture_output=True, text=True, timeout=300)
+        except sp.TimeoutExpired:
+            # Without this the thread dies silently and the entry says
+            # "thinking" for ever, which reads as the app being stuck.
+            THINKING[key].update(state="failed",
+                                 error="the model took longer than five minutes")
+            return
+        if proc.returncode != 0:
+            THINKING[key].update(
+                state="failed", error=(proc.stderr or proc.stdout or "").strip()[-400:])
+            return
+        # The goal is in the database before the decomposer exits, so dropping
+        # the entry here cannot leave a gap: the plan is already on the panel.
+        m = re.search(r"proposed goal stored: (\S+)", proc.stdout)
+        THINKING[key].update(state="done", goal=m.group(1) if m else None)
+        THINKING.pop(key, None)
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True, "id": key}
+
+
+def forget_thinking(key):
+    """Drop a failed attempt once the person has read why it failed."""
+    THINKING.pop(str(key), None)
+    return {"ok": True}
 
 
 def runner_state():
@@ -899,6 +946,8 @@ class Handler(BaseHTTPRequestHandler):
                          stdout=sp.DEVNULL, stderr=sp.DEVNULL)
             elif self.path == "/goal/new":
                 return self._send(start_decompose(payload.get("sentence", "")))
+            elif self.path == "/goal/forget":
+                return self._send(forget_thinking(payload.get("id", "")))
             else:
                 return self._send({"error": "unknown path"}, 404)
             self._send({"ok": True})
