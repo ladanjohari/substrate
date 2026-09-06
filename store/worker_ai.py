@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Substrate AI worker v1 — slice ai-worker-core of v0.2.
+Substrate AI worker v1: slice ai-worker-core of v0.2.
 
 Where worker.py executes runbooks (shell commands), this worker executes
 plain-language tasks by thinking: it reads a task's intent and exit criterion

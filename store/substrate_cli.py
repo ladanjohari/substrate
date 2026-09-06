@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Substrate CLI — the substrate without a browser.
+Substrate CLI: the substrate without a browser.
 
 Talks straight to the SQLite file, so it works whether or not the store service
 is running, and anything it writes shows up in the live tree on the next poll.
@@ -9,6 +9,8 @@ Every command takes --json for agents; the default output is for humans.
   substrate                            the tree (same as substrate tree)
   substrate decompose ["a goal"]       one sentence in, a proposed tree out; asks if you give none
   substrate approve <goal>             let the runner start on a waiting goal
+  substrate changes <goal> "..."       ask for changes; the plan is thought again
+  substrate reject <goal> [-w why]     throw a proposed plan away; the log keeps it
   substrate run [--once] [--agents N]  agents take work, N at a time (default 2)
   substrate add <id> TITLE -c ""       create a goal, or a task inside one (goal/task)
   substrate edit <node> -t "" -i ""    change a node's title, intent, or headline criterion
@@ -242,6 +244,32 @@ def cmd_approve(conn, a):
         res, a.json)
 
 
+def cmd_changes(conn, a):
+    goal = resolve(conn, a.goal)
+    note = " ".join(a.note)
+    if not note.strip():
+        raise SystemExit('say what should change: substrate changes '
+                         + goal + ' "two tasks, not five"')
+    import decompose
+    plan = decompose.reshape(goal, note)
+    lines = [f"{goal} replanned. {len(plan['tasks'])} tasks now:"]
+    for t in plan["tasks"]:
+        after = ", ".join(t.get("blocked_by") or []) or "nothing"
+        lines.append(f"  {t['id']}: {t['title']}  " + c(f"after {after}", "dim"))
+    lines += ["", "Read it, then: " + c(f"substrate approve {goal}", "amber")]
+    out("\n".join(lines), plan, a.json)
+
+
+def cmd_reject(conn, a):
+    goal = resolve(conn, a.goal)
+    res = store.reject(conn, goal, actor(), a.why)
+    out(f"{goal} rejected, with its {len(res['removed']) - 1} tasks. "
+        f"It stays in the log.\n"
+        f"  substrate log               see the whole record\n"
+        f"  substrate decompose         type a different goal",
+        res, a.json)
+
+
 def cmd_tree(conn, a):
     t = store.tree(conn)
     goals = [n for n in t["nodes"] if not n["parent"]]
@@ -401,7 +429,7 @@ def cmd_reopen(conn, a):
 
 def cmd_set_criterion(conn, a, to_state):
     res = store.set_criterion(conn, a.criterion, to_state, actor(), a.evidence)
-    tail = ("  all criteria met — this node can now be closed"
+    tail = ("  all criteria met, this node can now be closed"
             if res["node_closable"] and to_state == "met" else "")
     out(f"#{a.criterion} on {res['node']} -> {to_state}{tail}", res, a.json)
 
@@ -439,6 +467,11 @@ def main():
     s.add_argument("--model", help="which model the agent uses")
     s = sub.add_parser("approve", help="let the runner start on a waiting goal")
     s.add_argument("goal"); s.add_argument("-n", "--note")
+    s = sub.add_parser("changes", help="ask for changes to a proposed plan")
+    s.add_argument("goal"); s.add_argument("note", nargs="+",
+                                           help="what should change, in your words")
+    s = sub.add_parser("reject", help="throw a proposed plan away")
+    s.add_argument("goal"); s.add_argument("-w", "--why", help="why, for the log")
     s = sub.add_parser("add", help="create a goal, or a task as goal/slug")
     s.add_argument("id"); s.add_argument("title")
     s.add_argument("-i", "--intent", help="why this exists, one sentence")
@@ -480,6 +513,7 @@ def main():
     conn = store.db()
     dispatch = {
         "decompose": cmd_decompose, "approve": cmd_approve, "run": cmd_run,
+        "changes": cmd_changes, "reject": cmd_reject,
         "add": cmd_add, "edit": cmd_edit, "block": cmd_block, "unblock": cmd_unblock,
         "remove": cmd_remove,
         "tree": cmd_tree, "frontier": cmd_frontier, "path": cmd_path, "show": cmd_show,

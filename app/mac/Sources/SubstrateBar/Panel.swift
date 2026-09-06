@@ -153,6 +153,24 @@ final class Store: ObservableObject {
         post("/goal/forget", ["id": id, "actor": "you"]) { _ in }
     }
 
+    /// Ask for changes: the plan is thought again with your note in hand.
+    ///
+    /// The note is written to the log before the model is called, so the
+    /// reason survives whatever the model does next.
+    func askForChanges(goal: String, note: String, then: @escaping (String?) -> Void) {
+        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return then("Say what should change.") }
+        post("/goal/reshape", ["goal": goal, "note": text, "actor": "you"], then)
+    }
+
+    /// Throw a plan away. The rows are flagged, not deleted, so the log still
+    /// says a plan was proposed and you turned it down.
+    func reject(goal: String, why: String, then: @escaping (String?) -> Void) {
+        post("/goal/reject", ["goal": goal, "actor": "you",
+                              "note": why.trimmingCharacters(in: .whitespacesAndNewlines)],
+             then)
+    }
+
     /// Close a task. The store refuses while any check is still open.
     func markDone(node: String, then: @escaping (String?) -> Void) {
         post("/event", ["node": node, "to": "done", "actor": "you",

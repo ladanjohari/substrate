@@ -22,6 +22,12 @@ struct PanelView: View {
     @State private var goalError: String?
     @FocusState private var goalField: Bool
 
+    /// The three answers to a plan, and which one you are part way through.
+    private enum Answer { case none, changes, reject }
+    @State private var answer: Answer = .none
+    @State private var answerText = ""
+    @FocusState private var answerField: Bool
+
     private var p: Panel { store.panel }
     private var rows: Int { p.needs_you.count * 3 + p.running.count }
 
@@ -239,22 +245,95 @@ struct PanelView: View {
 
             if let e = lastError {
                 Text(e).font(.system(size: 11)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Self.contentPad).padding(.top, 6)
             }
 
-            HStack(spacing: 8) {
-                Spacer()
-                Button("Reshape it") { onOpenTree() }.controlSize(.small)
-                Button("Approve") { approve(g) }
-                    .controlSize(.small).keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, Self.contentPad).padding(.top, 10)
+            answers(g)
         }
         .padding(.vertical, 6)
     }
 
+    /// Three answers, as the proposal says: approve it, ask for changes, or
+    /// throw it away. Asking and rejecting both open a field, because a plan
+    /// discarded without a reason teaches the record nothing, and one press
+    /// away from destroying a plan is one press too few.
+    @ViewBuilder private func answers(_ g: Panel.Proposed) -> some View {
+        switch answer {
+        case .none:
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Reject") { open(.reject) }.controlSize(.small)
+                Button("Ask for changes") { open(.changes) }.controlSize(.small)
+                Button("Approve") { approve(g) }
+                    .controlSize(.small).keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, Self.contentPad).padding(.top, 10)
+
+        case .changes:
+            answerBox("What should change?", placeholder: "two tasks, not five",
+                      confirm: "Send") { store.askForChanges(goal: g.id, note: answerText,
+                                                             then: settle) }
+
+        case .reject:
+            answerBox("Throw this plan away? It stays in the log.",
+                      placeholder: "why, if you want to say", confirm: "Reject",
+                      destructive: true) { store.reject(goal: g.id, why: answerText,
+                                                        then: settle) }
+        }
+    }
+
+    private func answerBox(_ title: String, placeholder: String, confirm: String,
+                           destructive: Bool = false,
+                           run: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                TextField(placeholder, text: $answerText)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 12))
+                    .focused($answerField)
+                    // Return sends a note. It never throws a plan away: a
+                    // destructive act should not sit under the key people
+                    // press without looking.
+                    .onSubmit { if !destructive { run() } }
+                Button("Cancel") { close() }.controlSize(.small)
+                    .keyboardShortcut(.cancelAction)
+                if destructive {
+                    Button(confirm, action: run).controlSize(.small)
+                        .tint(.red)
+                } else {
+                    Button(confirm, action: run).controlSize(.small)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(answerText
+                            .trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .padding(.horizontal, Self.contentPad).padding(.top, 10)
+    }
+
+    private func open(_ a: Answer) {
+        answer = a
+        answerText = ""
+        lastError = nil
+        answerField = true
+    }
+
+    private func close() {
+        answer = .none
+        answerText = ""
+        lastError = nil
+    }
+
+    /// Every answer ends the same way: either the store explains why not, or
+    /// the plan is gone from the panel and there is nothing left to close.
+    private func settle(_ problem: String?) {
+        if let problem { lastError = problem } else { close() }
+    }
+
     private func approve(_ g: Panel.Proposed) {
-        store.approve(goal: g.id) { problem in lastError = problem }
+        store.approve(goal: g.id) { problem in settle(problem) }
     }
 
     /// A task that stopped and needs a person, with the checks it could not

@@ -513,6 +513,28 @@ def approve(conn, goal, actor, note=None):
     return {"goal": goal, "state": "working"}
 
 
+def reject(conn, goal, actor, note=None):
+    """Throw a plan away.
+
+    The rows are flagged, not deleted, so the log still says a plan was
+    proposed and a person turned it down. A record that quietly loses the
+    plans you refused would only show the ones you liked.
+    """
+    row = conn.execute("SELECT state, parent FROM nodes WHERE id=? AND removed=0",
+                       (goal,)).fetchone()
+    if not row:
+        raise ValueError(f"unknown goal: {goal}")
+    if row["parent"]:
+        raise ValueError(f"{goal} is a task, not a plan; reject its goal: {row['parent']}")
+    if row["state"] != "waiting":
+        raise ValueError(f"{goal} is {row['state']}, and only a plan waiting for you "
+                         f"can be rejected")
+    why = (note or "").strip()
+    removed = remove_node(conn, goal, actor,
+                          "rejected: " + why if why else "rejected")
+    return {"goal": goal, "removed": removed, "why": why or None}
+
+
 def claim(conn, node, actor):
     """Take a task for one agent, if nobody else has it.
 
@@ -823,6 +845,53 @@ def start_decompose(sentence):
     return {"ok": True, "id": key}
 
 
+def start_reshape(goal, note):
+    """Ask for changes: record the ask, then re-plan in the background.
+
+    The note is written to the log before the model is called, so the reason
+    survives even if the call fails. The wait then shows in the panel the same
+    way a new goal does.
+    """
+    import subprocess as sp
+    import threading
+    note = (note or "").strip()
+    if not note:
+        raise ValueError("say what should change")
+    conn = db()
+    row = conn.execute("SELECT state, parent FROM nodes WHERE id=? AND removed=0",
+                       (goal,)).fetchone()
+    if not row:
+        raise ValueError(f"unknown goal: {goal}")
+    if row["parent"]:
+        raise ValueError(f"{goal} is a task; ask for changes on its goal: {row['parent']}")
+    if row["state"] != "waiting":
+        raise ValueError(f"{goal} is {row['state']}, and only a plan waiting for you "
+                         f"can be changed")
+    append_event(conn, goal, "waiting", "you", "asked for changes: " + note)
+
+    key = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+    THINKING[key] = {"id": key, "sentence": note, "state": "thinking",
+                     "error": None, "goal": goal}
+
+    def run():
+        try:
+            proc = sp.run(["python3", str(Path(__file__).parent / "decompose.py"),
+                           "--reshape", goal, note],
+                          capture_output=True, text=True, timeout=300)
+        except sp.TimeoutExpired:
+            THINKING[key].update(state="failed",
+                                 error="the model took longer than five minutes")
+            return
+        if proc.returncode != 0:
+            THINKING[key].update(
+                state="failed", error=(proc.stderr or proc.stdout or "").strip()[-400:])
+            return
+        THINKING.pop(key, None)
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "id": key, "goal": goal}
+
+
 def forget_thinking(key):
     """Drop a failed attempt once the person has read why it failed."""
     THINKING.pop(str(key), None)
@@ -946,6 +1015,12 @@ class Handler(BaseHTTPRequestHandler):
                          stdout=sp.DEVNULL, stderr=sp.DEVNULL)
             elif self.path == "/goal/new":
                 return self._send(start_decompose(payload.get("sentence", "")))
+            elif self.path == "/goal/reject":
+                return self._send(reject(db(), payload["goal"], actor,
+                                         payload.get("note")))
+            elif self.path == "/goal/reshape":
+                return self._send(start_reshape(payload["goal"],
+                                                payload.get("note", "")))
             elif self.path == "/goal/forget":
                 return self._send(forget_thinking(payload.get("id", "")))
             else:

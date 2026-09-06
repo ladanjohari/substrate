@@ -57,6 +57,47 @@ Never use an em dash (the long dash) anywhere in your output. Use a comma, a
 colon, or two sentences instead."""
 
 
+RESHAPE_PROMPT = """You are the decomposer inside a goal-tracking system. A person read the plan below and asked for something to change.
+
+The goal: {title}
+What it means: {intent}
+Done when: {exit_criterion}
+
+The plan you proposed:
+{plan}
+
+What the person wants changed:
+"{note}"
+
+Produce ONLY a JSON object, no other text, with this exact shape:
+{{
+  "tasks": [
+    {{"id": "<slug>", "title": "<short imperative>",
+      "intent": "<what this piece is for>",
+      "exit_criterion": "<one testable sentence, the headline>",
+      "criteria": ["<each separately checkable condition, 1 to 5 of them>"],
+      "blocked_by": ["<task ids that must finish first, [] if none>"]}}
+  ]
+}}
+
+Rules: 4 to 8 tasks. Each task is a vertical slice, a complete, demoable piece,
+not a layer. Edges form a DAG: parallel tasks share no edge; merge points list
+several blockers. Exit criteria must be checkable by a stranger.
+
+Criteria are the heart of this: split a task's exit into the separate conditions
+that can be checked and evidenced one at a time, so partial progress is visible
+instead of hidden inside one all-or-nothing sentence. Each is a single fact a
+stranger could confirm or refute by looking. Plain language, no jargon, the
+reader may not be technical.
+
+Make the change they asked for. Leave the rest of the plan alone, including the
+ids and the wording of the tasks the change does not touch, so the person can
+see what moved and what did not.
+
+Never use an em dash (the long dash) anywhere in your output. Use a comma, a
+colon, or two sentences instead."""
+
+
 def api(path, payload=None):
     req = urllib.request.Request(STORE + path)
     if payload is not None:
@@ -66,10 +107,11 @@ def api(path, payload=None):
         return json.loads(r.read())
 
 
-def think(goal_sentence):
+def ask(prompt):
+    """One call to the model. Planning and replanning fail the same way."""
     try:
         out = subprocess.run(
-            ["claude", "-p", PROMPT.format(goal=goal_sentence), "--model", "sonnet"],
+            ["claude", "-p", prompt, "--model", "sonnet"],
             capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError:
@@ -89,6 +131,85 @@ def think(goal_sentence):
     if not m:
         sys.exit("no JSON in model output:\n" + out.stdout[:400])
     return json.loads(m.group(0))
+
+
+def think(goal_sentence):
+    return ask(PROMPT.format(goal=goal_sentence))
+
+
+def write_tasks(conn, gid, tasks):
+    """Write one set of tasks, their criteria and their edges, under a goal."""
+    for t in tasks:
+        tid = f"{gid}/{t['id']}"
+        conn.execute(
+            "INSERT INTO nodes (id,title,intent,exit_criterion,parent) VALUES (?,?,?,?,?)",
+            (tid, t["title"], t["intent"], t["exit_criterion"], gid),
+        )
+        for i, text in enumerate(t.get("criteria") or [t["exit_criterion"]]):
+            conn.execute("INSERT INTO criteria (node, ord, text) VALUES (?,?,?)",
+                         (tid, i, text))
+    ids = {t["id"] for t in tasks}
+    for t in tasks:
+        for b in t.get("blocked_by", []):
+            # A blocker the model invented would point at a row that does not
+            # exist, and the whole plan would fail to save because of it.
+            if b in ids:
+                conn.execute("INSERT INTO edges (blocker,blocked) VALUES (?,?)",
+                             (f"{gid}/{b}", f"{gid}/{t['id']}"))
+
+
+def reshape(goal_id, note):
+    """Re-plan one goal, keeping the goal and replacing its tasks.
+
+    The goal's own title, intent and exit criterion are left alone. Wanting a
+    different thing is a different goal, and rejecting this one and typing
+    that one says so plainly. This is for changing how it will be done.
+    """
+    from pathlib import Path as _P
+    sys.path.insert(0, str(_P(__file__).parent))
+    import substrate_store as s
+
+    conn = s.db()
+    g = conn.execute("SELECT * FROM nodes WHERE id=? AND removed=0",
+                     (goal_id,)).fetchone()
+    if not g:
+        sys.exit(f"unknown goal: {goal_id}")
+    if g["state"] != "waiting":
+        sys.exit(f"{goal_id} is {g['state']}; only a plan waiting for you can be reshaped")
+
+    old = [dict(r) for r in conn.execute(
+        "SELECT * FROM nodes WHERE parent=? AND removed=0 ORDER BY id", (goal_id,))]
+    lines = []
+    for t in old:
+        after = [x["blocker"].split("/")[-1] for x in conn.execute(
+            "SELECT blocker FROM edges WHERE blocked=?", (t["id"],))]
+        lines.append(f"- {t['id'].split('/')[-1]}: {t['title']}"
+                     + (f"  [after: {', '.join(after)}]" if after else ""))
+
+    # Said here, after the checks, so a refusal never comes with a line
+    # claiming the model is already thinking about it.
+    print("rethinking the plan (one AI call)...")
+    plan = ask(RESHAPE_PROMPT.format(
+        title=g["title"], intent=g["intent"], exit_criterion=g["exit_criterion"],
+        plan="\n".join(lines) or "(no tasks)", note=note))
+    if not plan.get("tasks"):
+        sys.exit("the model came back with no tasks, so the old plan is left alone")
+
+    # A task that has history is never thrown away. Nothing has run on an
+    # unapproved plan, so there is nothing to lose here, and checking rather
+    # than assuming is what keeps that true.
+    for t in old:
+        if conn.execute("SELECT 1 FROM events WHERE node=?", (t["id"],)).fetchone():
+            sys.exit(f"{t['id']} already has history; reshaping would lose it")
+    for t in old:
+        conn.execute("DELETE FROM edges WHERE blocker=? OR blocked=?", (t["id"], t["id"]))
+        conn.execute("DELETE FROM criteria WHERE node=?", (t["id"],))
+        conn.execute("DELETE FROM nodes WHERE id=?", (t["id"],))
+    write_tasks(conn, goal_id, plan["tasks"])
+    conn.commit()
+    s.append_event(conn, goal_id, "waiting", "decomposer",
+                   f"replanned after your note; {len(plan['tasks'])} tasks")
+    return plan
 
 
 def store_proposal(plan):
@@ -113,21 +234,7 @@ def store_proposal(plan):
     )
     conn.execute("INSERT INTO criteria (node, ord, text) VALUES (?,0,?)",
                  (gid, g["exit_criterion"]))
-    for t in plan["tasks"]:
-        tid = f"{gid}/{t['id']}"
-        conn.execute(
-            "INSERT INTO nodes (id,title,intent,exit_criterion,parent) VALUES (?,?,?,?,?)",
-            (tid, t["title"], t["intent"], t["exit_criterion"], gid),
-        )
-        for i, text in enumerate(t.get("criteria") or [t["exit_criterion"]]):
-            conn.execute("INSERT INTO criteria (node, ord, text) VALUES (?,?,?)",
-                         (tid, i, text))
-    for t in plan["tasks"]:
-        for b in t.get("blocked_by", []):
-            conn.execute(
-                "INSERT INTO edges (blocker,blocked) VALUES (?,?)",
-                (f"{gid}/{b}", f"{gid}/{t['id']}"),
-            )
+    write_tasks(conn, gid, plan["tasks"])
     conn.commit()
     s.append_event(conn, gid, "waiting", "decomposer",
                    f"proposed tree with {len(plan['tasks'])} tasks; awaiting negotiation")
@@ -136,7 +243,20 @@ def store_proposal(plan):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.exit('usage: decompose.py "the goal, in one sentence" | --json plan.json')
+        sys.exit('usage: decompose.py "the goal, in one sentence"'
+                 ' | --json plan.json | --reshape <goal> "what should change"')
+    if sys.argv[1] == "--reshape":
+        if len(sys.argv) < 4:
+            sys.exit('usage: decompose.py --reshape <goal> "what should change"')
+        gid = sys.argv[2]
+        out = reshape(gid, " ".join(sys.argv[3:]))
+        print(f"replanned goal: {gid}")
+        for t in out["tasks"]:
+            blockers = ", ".join(t.get("blocked_by") or []) or "none"
+            print(f"  {t['id']}: {t['title']}  [blocked by: {blockers}]")
+        print()
+        print("This plan is WAITING FOR YOU. Nothing runs until you approve it.")
+        sys.exit(0)
     if sys.argv[1] == "--json":
         plan = json.load(open(sys.argv[2]))
     else:

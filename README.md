@@ -63,6 +63,8 @@ for machine-readable output.
 
 Also there: `decompose "a goal in one sentence"` (a proposed tree with criteria,
 one call to the `claude` command, arrives waiting for approval), `approve <goal>`,
+`changes <goal> "what should change"` (the plan is thought again with your note
+in hand), `reject <goal>` (throw a proposed plan away; the log keeps it),
 `run` (let an agent work),
 `frontier` (what may start right now), `show`, `criteria`, `add-criterion`,
 `state`, `log`. Run `./bin/substrate -h` for the full list.
@@ -95,6 +97,8 @@ refuses. That refusal is the product.
 
 ```
 substrate approve <goal>       nothing runs before this
+substrate changes <goal> "..." ask for changes instead, and it replans
+substrate reject <goal>        throw the plan away, the log keeps it
 substrate run --once           one round of work, then stop
 substrate run                  keeps going until you stop it with control-C
 substrate run --agents 4       four tasks at the same time (default is 2)
@@ -128,11 +132,13 @@ running right now (with which agent holds it and for how long), the counts, and
 the dots for the status item already ordered, with anything needing a person
 ahead of anything merely busy. The rest of the API is there too: `/tree`,
 `/frontier`, `/critical-path`, `/criteria/<node>`, `/log`, and the writes
-`/event`, `/approve`, `/claim`, `/criterion/set`.
+`/event`, `/approve`, `/claim`, `/criterion/set`, and the three that answer a
+proposed plan: `/goal/new`, `/goal/reshape`, `/goal/reject`.
 
 `/panel` also carries the plan of any goal nobody has approved, tasks and all,
 because approving without seeing what you are approving is the thing the gate
-exists to prevent.
+exists to prevent. It carries `thinking` too: a sentence that is not a plan yet,
+so an app can show the half minute the model takes instead of looking idle.
 
 Start the service with `python3 store/substrate_store.py serve 8040`.
 

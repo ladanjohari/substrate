@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Substrate worker v0 — slice E of plan v1.
+Substrate worker v0: slice E of plan v1.
 
 The work loop from the brief: pick a frontier task, claim it, execute, report
 state changes with evidence back to the store. The tree viewer shows the dot
-turn white (working) and then green (done) or red (error) — the worker never
+turn white (working) and then green (done) or red (error). The worker never
 talks to the display, only to the store.
 
 v0 executes tasks that carry a `runbook` (a shell command). Tasks without a
