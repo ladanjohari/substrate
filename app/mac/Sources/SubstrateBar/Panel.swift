@@ -10,6 +10,7 @@ struct Panel: Decodable, Equatable {
     var goals: [Goal] = []
     var needs_you: [Item] = []
     var running: [Item] = []
+    var proposed: [Proposed] = []
     var counts: Counts = Counts()
     var pill: Pill = Pill()
 
@@ -31,6 +32,16 @@ struct Panel: Decodable, Equatable {
         var open_criteria: [String]?
         var open_ids: [Int]?
         var elapsed: String?
+        var after: [String]?
+    }
+
+    /// A goal nobody has approved yet, with the plan you are being asked to
+    /// approve. The tasks come with it because approving without seeing what
+    /// you are approving is the thing this gate exists to prevent.
+    struct Proposed: Decodable, Equatable, Identifiable {
+        let id: String
+        let title: String
+        let tasks: [Item]
     }
 
     struct Counts: Decodable, Equatable {
@@ -103,6 +114,15 @@ final class Store: ObservableObject {
         guard !text.isEmpty else { return then("Say what shows it is true.") }
         post("/criterion/set",
              ["criterion": criterion, "to": "met", "evidence": text, "actor": "you"], then)
+    }
+
+    /// Release a plan to the agents. Until this, nothing runs.
+    ///
+    /// The store will only accept it on a goal that is waiting, so a second
+    /// press cannot start anything twice.
+    func approve(goal: String, then: @escaping (String?) -> Void) {
+        post("/approve", ["goal": goal, "actor": "you",
+                          "note": "approved from the menu bar"], then)
     }
 
     /// Close a task. The store refuses while any check is still open.

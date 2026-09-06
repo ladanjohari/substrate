@@ -488,6 +488,30 @@ def add_node(conn, actor, payload):
     conn.commit()
 
 
+def approve(conn, goal, actor, note=None):
+    """Release a plan to the agents.
+
+    The guard lives here rather than in each client. The command line had it
+    and the app did not, so approving twice from the app wrote a second
+    working -> working event and put noise in a log whose whole value is that
+    it is true.
+    """
+    row = conn.execute("SELECT state, parent FROM nodes WHERE id=? AND removed=0",
+                       (goal,)).fetchone()
+    if not row:
+        raise ValueError(f"unknown goal: {goal}")
+    if row["parent"]:
+        raise ValueError(f"{goal} is a task; approve its goal: {row['parent']}")
+    if row["state"] != "waiting":
+        if row["state"] in ("idle", "working"):
+            raise ValueError(f"{goal} is already open for work, it needs no approval")
+        raise ValueError(f"{goal} is {row['state']}, and only a plan waiting for you "
+                         f"can be approved")
+    append_event(conn, goal, "working", actor,
+                 note or "approved; the runner may start")
+    return {"goal": goal, "state": "working"}
+
+
 def claim(conn, node, actor):
     """Take a task for one agent, if nobody else has it.
 
@@ -634,6 +658,19 @@ def panel(conn):
              if n["state"] == "idle" and n["id"] not in has_open_kids
              and not blocked_by.get(n["id"])]
 
+    # A goal nobody has approved is a plan waiting to be read. The panel needs
+    # the tasks themselves, not just a count, because approving without seeing
+    # what you are approving is exactly the thing this gate exists to prevent.
+    proposed = []
+    for g in (x for x in goals if x["state"] == "waiting"):
+        kids = [n for n in tasks if root_goal(conn, n["id"]) == g["id"]]
+        proposed.append({
+            "id": g["id"], "title": g["title"],
+            "tasks": [dict(slim(n), after=[b.split("/")[-1]
+                                           for b in blocked_by.get(n["id"], [])])
+                      for n in sorted(kids, key=lambda n: n["id"])],
+        })
+
     counts = {
         "needs_you": len(needs_you), "running": len(running),
         "ready": len(ready),
@@ -654,7 +691,8 @@ def panel(conn):
     return {
         "as_of": now(),
         "goals": [{"id": g["id"], "title": g["title"], "state": g["state"]} for g in goals],
-        "needs_you": needs_you, "running": running, "counts": counts,
+        "needs_you": needs_you, "running": running, "proposed": proposed,
+        "counts": counts,
         "pill": {"dots": dots, "overflow": max(0, len(order) - 4)},
     }
 
@@ -692,6 +730,8 @@ def call(path, payload=None):
         return {"ok": True}
     if path == "/claim":
         return {"ok": claim(conn, payload["node"], actor)}
+    if path == "/approve":
+        return approve(conn, payload["goal"], actor, payload.get("note"))
     if path == "/criterion/set":
         return set_criterion(conn, int(payload["criterion"]), payload["to"],
                              actor, payload.get("evidence"))
@@ -845,6 +885,9 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/criterion/add":
                 cid = add_criterion(db(), payload["node"], payload["text"], actor)
                 return self._send({"ok": True, "criterion": cid})
+            elif self.path == "/approve":
+                return self._send(approve(db(), payload["goal"], actor,
+                                          payload.get("note")))
             elif self.path == "/criterion/set":
                 return self._send(set_criterion(db(), int(payload["criterion"]),
                                                 payload["to"], actor,

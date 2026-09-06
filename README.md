@@ -128,7 +128,11 @@ running right now (with which agent holds it and for how long), the counts, and
 the dots for the status item already ordered, with anything needing a person
 ahead of anything merely busy. The rest of the API is there too: `/tree`,
 `/frontier`, `/critical-path`, `/criteria/<node>`, `/log`, and the writes
-`/event`, `/claim`, `/criterion/set`.
+`/event`, `/approve`, `/claim`, `/criterion/set`.
+
+`/panel` also carries the plan of any goal nobody has approved, tasks and all,
+because approving without seeing what you are approving is the thing the gate
+exists to prevent.
 
 Start the service with `python3 store/substrate_store.py serve 8040`.
 

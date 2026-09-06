@@ -54,6 +54,17 @@ never the thing that gets folded into the count: the pill compresses the quiet,
 never the actionable. That ordering is decided in the store, not here, so the
 command line and the app cannot disagree.
 
+## Approving a plan
+
+A goal nobody has approved shows the whole plan: every task, how many checks it
+carries, and what it waits on. Press Approve and the agents may start. Until
+then nothing runs, which is the point of the gate.
+
+The rule that a plan can only be approved once, and only while it is waiting,
+lives in the store rather than in the app. The command line had that guard and
+the app did not, so approving twice from the app put a second event in a log
+whose only value is that it is true.
+
 ## Dragging it off the menu bar
 
 The panel is a transient popover, so it closes when you look at something else. That is right

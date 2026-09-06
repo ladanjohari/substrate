@@ -32,6 +32,16 @@ struct PanelView: View {
             } else if p.goals.isEmpty {
                 message("Nothing on the go",
                         "Describe something you want done and it becomes a plan you can approve.")
+            } else if let waiting = p.proposed.first {
+                // A plan waiting for you is the only thing that matters until
+                // you answer it, so it takes the whole panel. Only a long plan
+                // scrolls: a ScrollView wrapping content that fits adds nothing
+                // and cannot be captured for review.
+                if waiting.tasks.count > 10 {
+                    ScrollView { plan(waiting) }.frame(maxHeight: 440)
+                } else {
+                    plan(waiting)
+                }
             } else if rows > 8 {
                 // Only a long list scrolls. A short one lays itself out
                 // directly, which is the common case and the one that can be
@@ -50,7 +60,7 @@ struct PanelView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(p.goals.first?.title ?? "Substrate")
+            Text(p.proposed.first?.title ?? p.goals.first?.title ?? "Substrate")
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
             Spacer()
@@ -65,7 +75,7 @@ struct PanelView: View {
         let c = p.counts
         if c.needs_you > 0 { return "\(c.needs_you) needs you" }
         if c.running > 0 { return "\(c.running) running" }
-        if c.unapproved_goals > 0 { return "waiting for you to approve" }
+        if c.unapproved_goals > 0 { return "not approved yet" }
         if c.done > 0 && c.ready == 0 && c.blocked == 0 { return "done" }
         return "\(c.ready) ready"
     }
@@ -99,6 +109,46 @@ struct PanelView: View {
         if p.counts.blocked > 0 { bits.append("\(p.counts.blocked) waiting on something") }
         if p.counts.done > 0 { bits.append("\(p.counts.done) done") }
         return bits.joined(separator: ", ")
+    }
+
+    /// The plan, before anything has run. Read it, then release it.
+    private func plan(_ g: Panel.Proposed) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Nothing runs until you approve this.")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .padding(.horizontal, Self.contentPad).padding(.bottom, 8)
+
+            ForEach(g.tasks) { t in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(t.title).font(.system(size: 13)).lineLimit(2)
+                    Spacer(minLength: 8)
+                    Text(t.after?.isEmpty == false
+                         ? "after \(t.after!.joined(separator: ", "))"
+                         : "\(t.total) check\(t.total == 1 ? "" : "s")")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .fixedSize()
+                }
+                .padding(.horizontal, Self.contentPad).padding(.vertical, 4)
+            }
+
+            if let e = lastError {
+                Text(e).font(.system(size: 11)).foregroundStyle(.red)
+                    .padding(.horizontal, Self.contentPad).padding(.top, 6)
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Reshape it") { onOpenTree() }.controlSize(.small)
+                Button("Approve") { approve(g) }
+                    .controlSize(.small).keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, Self.contentPad).padding(.top, 10)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func approve(_ g: Panel.Proposed) {
+        store.approve(goal: g.id) { problem in lastError = problem }
     }
 
     /// A task that stopped and needs a person, with the checks it could not

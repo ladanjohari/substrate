@@ -22,6 +22,30 @@ func demoPanel() -> Panel {
                        depth: 0, open_criteria: nil, open_ids: nil, elapsed: "1m")]
     p.counts = .init(needs_you: 1, running: 2, ready: 1, done: 2, blocked: 2,
                      unapproved_goals: 0)
+    return p
+}
+
+/// The other state worth reviewing: a plan nobody has approved.
+@MainActor
+func demoPlan() -> Panel {
+    var p = Panel()
+    p.goals = [.init(id: "resume", title: "Write my resume", state: "waiting")]
+    func t(_ id: String, _ title: String, _ n: Int, _ after: [String] = []) -> Panel.Item {
+        .init(id: "resume/" + id, title: title, goal: "resume", state: "idle", owner: nil,
+              met: 0, total: n, depth: 0, open_criteria: nil, open_ids: nil,
+              elapsed: nil, after: after)
+    }
+    p.proposed = [.init(id: "resume", title: "Write my resume", tasks: [
+        t("format", "Choose a format", 2),
+        t("gather", "Gather career information", 3),
+        t("exp", "Write the experience section", 3, ["format", "gather"]),
+        t("edu", "Write the education section", 3, ["format", "gather"]),
+        t("proof", "Edit and proofread", 2, ["exp", "edu"]),
+        t("export", "Export and save", 2, ["proof"]),
+    ])]
+    p.counts = .init(needs_you: 0, running: 0, ready: 0, done: 0, blocked: 6,
+                     unapproved_goals: 1)
+    p.pill = .init(dots: ["idle"], overflow: 0)
     p.pill = .init(dots: ["needs", "working", "working", "done"], overflow: 3)
     return p
 }
@@ -61,7 +85,8 @@ if let i = args.firstIndex(of: "--render-pill"), i + 1 < args.count {
 if let i = args.firstIndex(of: "--render-panel"), i + 1 < args.count {
     MainActor.assumeIsolated {
         let store = Store()
-        store.loadDemo(args.contains("--empty") ? Panel() : demoPanel())
+        store.loadDemo(args.contains("--empty") ? Panel()
+                       : args.contains("--plan") ? demoPlan() : demoPanel())
         render(PanelView(store: store, onOpenTree: {}, onQuit: {}),
                to: args[i + 1], scale: 2, dark: args.contains("--dark"))
     }
