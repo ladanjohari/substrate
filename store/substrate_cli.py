@@ -244,6 +244,162 @@ def cmd_approve(conn, a):
         res, a.json)
 
 
+def order_tasks(tasks, blockers):
+    """Blockers before the things they block, so 'after X' always points up."""
+    left = {t["id"]: t for t in tasks}
+    placed, ordered = set(), []
+    while left:
+        ready = [t for t in left.values()
+                 if not [b for b in blockers.get(t["id"], []) if b in left and b not in placed]]
+        if not ready:                      # a cycle, should not happen; print the rest as is
+            ready = sorted(left.values(), key=lambda t: t["id"])
+        for t in sorted(ready, key=lambda t: t["id"]):
+            ordered.append(t); placed.add(t["id"]); left.pop(t["id"])
+    return ordered
+
+
+def boxes(n, plain=False):
+    """Criteria as a row of boxes: met, failed, still open."""
+    cs = n.get("criteria") or []
+    if not cs:
+        return "no criteria"
+    if len(cs) > 8:
+        return f"{n['criteria_met']}/{n['criteria_total']}"
+    if plain:
+        return "".join(CRIT[x["state"]] for x in cs)
+    return "".join(c(CRIT[x["state"]], *CRIT_STYLE[x["state"]]) for x in cs)
+
+
+def width():
+    # Wrapping mid-word makes the tree unreadable, so every line is built to
+    # fit the window. Narrower than 60 is treated as 60; a pipe reports 80.
+    return max(60, shutil.get_terminal_size((80, 24)).columns)
+
+
+def why(node, blockers, state, room=None, n=None, has_kids=False):
+    if state == "done":
+        return "done"
+    if state == "working":
+        return "an agent is on it"
+    if state == "waiting":
+        if n and n.get("criteria_total"):
+            left = n["criteria_total"] - n["criteria_met"]
+            return f"needs you, {left} of {n['criteria_total']} checks left"
+        return "needs you"
+    if state == "error":
+        return "error, look at the log"
+    b = [x.split("/")[-1] for x in blockers.get(node, [])]
+    if not b and state == "idle":
+        # A task with parts is not worked directly; its parts are how it gets done.
+        return "its parts first" if has_kids else "ready for an agent"
+    if not b:
+        return ""
+    line = "after " + ", ".join(b)
+    if room is None or len(line) <= room:
+        return line
+    if len(b) > 1:
+        short = f"after {b[0]} +{len(b) - 1} more"
+        if len(short) <= room:
+            return short
+        return f"after {len(b)} tasks"
+    return "after " + (b[0] if len(b[0]) + 6 <= room else b[0][:max(3, room - 7)] + "\u2026")
+
+
+def tally(tasks):
+    """The one line that says where a goal stands. Counts every level."""
+    n = {"done": 0, "waiting": 0, "working": 0, "ready": 0, "blocked": 0}
+    for t in tasks:
+        if t["state"] in ("done", "waiting", "working"):
+            n[t["state"]] += 1
+        elif t.get("_ready"):
+            n["ready"] += 1
+        else:
+            n["blocked"] += 1
+    bits = []
+    if n["waiting"]:
+        bits.append(c(f"{n['waiting']} need you", "amber", "bold"))
+    if n["working"]:
+        bits.append(c(f"{n['working']} running", "blue"))
+    if n["ready"]:
+        bits.append(f"{n['ready']} ready")
+    if n["blocked"]:
+        bits.append(c(f"{n['blocked']} blocked", "dim"))
+    if n["done"]:
+        bits.append(c(f"{n['done']} done", "green"))
+    return "   ".join(bits)
+
+
+def render_goal(g, kids_of, blockers, open_blockers=None):
+    """Draw a goal and everything under it, at any depth."""
+    title = c(g["title"], "bold")
+    lines = [f"{title}   {c(g['id'], 'dim')}"]
+    if g["state"] == "waiting":
+        lines.append(c("  not approved, so nothing runs", "amber", "bold"))
+        lines.append(c(f"  substrate approve {g['id']}", "amber"))
+
+    open_blockers = blockers if open_blockers is None else open_blockers
+    flat = []
+    def walk(parent, depth):
+        for t in order_tasks(kids_of.get(parent, []), blockers):
+            t["_depth"] = depth
+            t["_kids"] = bool(kids_of.get(t["id"]))
+            t["_ready"] = (not open_blockers.get(t["id"]) and t["state"] == "idle"
+                           and not t["_kids"])
+            flat.append(t)
+            walk(t["id"], depth + 1)
+    walk(g["id"], 0)
+
+    if not flat:
+        lines.append(c("  no tasks yet", "dim"))
+        return lines
+    lines.append("  " + tally(flat))
+    lines.append("")
+
+    # The marker indents with its name, or the shape of the tree is lost: a
+    # column of dots down the left edge says everything sits at one level.
+    w = max(len(t["id"].split("/")[-1]) + t["_depth"] * 2 for t in flat)
+    bw = max(len(boxes(t, plain=True)) for t in flat)
+    room = width() - (2 + 2 + w + 2 + bw + 2)
+    for t in flat:
+        st, d = t["state"], t["_depth"]
+        name = t["id"].split("/")[-1]
+        cell = name.ljust(w - d * 2)
+        mark = c(MARK[st], *STATE_STYLE[st])
+        name_out = c(cell, "bold") if st == "waiting" else \
+            (c(cell, "dim") if st == "idle" and not t["_ready"] else cell)
+        bpad = " " * (bw - len(boxes(t, plain=True)))
+        reason = why(t["id"], open_blockers, st, room, t, t["_kids"])
+        rstyle = {"waiting": ("amber", "bold"), "done": ("green",),
+                  "working": ("blue",), "error": ("red", "bold")}.get(st, ("dim",))
+        lines.append(f"  {'  ' * d}{mark} {name_out}  {boxes(t)}{bpad}  "
+                     f"{c(reason, *rstyle)}")
+    return lines
+
+
+def next_action(conn, goals):
+    """End on the one thing to do next, not on a legend."""
+    needs = [t for g in goals for t in g["tasks"] if t["state"] == "waiting"]
+    unapproved = [g for g in goals if g["state"] == "waiting"]
+    if not needs and unapproved:
+        g = unapproved[0]
+        return [c("Next", "bold") + "  read it, then let it run",
+                "      " + c(f"substrate approve {g['id']}", "amber")]
+    if needs:
+        t = needs[0]["id"].split("/")[-1]
+        word = "task needs" if len(needs) == 1 else "tasks need"
+        return [c("Next", "bold") + f"  {len(needs)} {word} you, starting with {t}",
+                "      " + c(f"substrate show {t}", "amber")
+                + c("     see what is left on it", "dim")]
+    ready = [t for g in goals for t in g["tasks"] if t.get("_ready")]
+    if ready:
+        return [c("Next", "bold") + f"  {len(ready)} ready for an agent",
+                "      " + c("substrate run --once", "blue")
+                + c("     one round, then stop", "dim")]
+    if goals and all(t["state"] == "done" for g in goals for t in g["tasks"]):
+        return [c("Every task is done.", "green", "bold")]
+    return []
+
+
 def cmd_changes(conn, a):
     goal = resolve(conn, a.goal)
     note = " ".join(a.note)
