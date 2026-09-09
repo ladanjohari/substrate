@@ -26,8 +26,10 @@ Signed and notarised direct download does not have this problem.
 ## The order
 
 1. **`SubstrateCore`**, the library: schema, the two rules, the queries. **Done.**
-2. **The command line**, as a second executable on the same core. **Reading and
-   both rules are done.** The rest of the commands follow.
+2. **The command line**, as a second executable on the same core. **Done:**
+   tree, show, criteria, meet, fail, state, log, frontier, approve, reject,
+   remove, panel. Still Python: add, edit, block, unblock, path, decompose,
+   changes, run, reopen, add-criterion.
 3. **The app** reads the core directly instead of over HTTP, and the HTTP
    server becomes optional rather than the way the app works.
 4. **The agents**: the decomposer, the runner and the workers. Mostly a
@@ -40,8 +42,11 @@ Signed and notarised direct download does not have this problem.
 ./bin/substrate-compare
 ```
 
-It builds one database, asks both implementations the same questions, and
-fails if any answer differs. Refusals are compared by their words, because a
+It builds one database with the states that behave differently, a plan still
+awaiting approval, a task being worked, a task that stopped for a person, then
+asks both implementations the same questions and fails if any answer differs.
+Fifteen answers, including `panel`, which is the biggest query and the one the
+app lives on. Refusals are compared by their words, because a
 person reads them to decide what to do next.
 
 ```

@@ -24,6 +24,15 @@ PY = ROOT / "bin" / "substrate"
 SWIFT = ROOT / "app" / "mac" / ".build" / "debug" / "substrate-swift"
 
 
+def python_panel(env):
+    """The Python serves panel over HTTP, so ask the module for it directly."""
+    code = ("import sys, json; sys.path.insert(0, %r);"
+            "import substrate_store as s; print(json.dumps(s.panel(s.db())))"
+            % str(ROOT / "store"))
+    p = subprocess.run(["python3", "-c", code], capture_output=True, text=True, env=env)
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
 def run(binary, args, env):
     p = subprocess.run([str(binary)] + args, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout.strip(), p.stderr.strip()
@@ -42,7 +51,8 @@ def normalise(text):
             # fields, not part of what the record means.
             return {k: strip(v) for k, v in x.items()
                     if not k.startswith("_")
-                    and k not in ("ts", "checked_at", "checked_by", "actor", "seq")}
+                    and k not in ("ts", "checked_at", "checked_by", "actor", "seq",
+                                "as_of", "elapsed")}
         if isinstance(x, list):
             return [strip(v) for v in x]
         return x
@@ -68,6 +78,16 @@ def main():
         ["add", "trip/hotel", "Book a hotel", "-c", "Free cancellation", "--after", "flights"],
         ["add", "trip/flights/seats", "Choose seats", "-c", "Two together"],
         ["meet", "2", "-e", "booked on the 14th"],
+        # A second goal still awaiting approval, so the panel has a proposed
+        # plan to describe, with an edge inside it.
+        ["add", "move", "Move house", "-c", "The keys are handed over"],
+        ["add", "move/pack", "Pack", "-c", "Every room is boxed"],
+        ["add", "move/van", "Book a van", "-c", "Booked for the 3rd", "--after", "pack"],
+        ["state", "move", "waiting", "-n", "proposed"],
+        # And states the panel treats differently: one being worked, one that
+        # stopped and needs a person.
+        ["state", "hotel", "working", "-n", "claimed"],
+        ["state", "seats", "waiting", "-n", "needs a decision"],
     ]
     for args in setup:
         code, out, err = run(PY, args, env)
@@ -86,9 +106,31 @@ def main():
         (["meet", "3"], "both refuse"),
         (["meet", "999", "-e", "x"], "both refuse"),
         (["state", "flights", "finished"], "both refuse"),
+        (["--json", "frontier"], "same"),
+        (["approve", "trip"], "both refuse"),        # already open for work
+        (["approve", "flights"], "both refuse"),     # a task, not a goal
+        (["reject", "trip"], "both refuse"),         # only a proposed plan
+        (["reject", "nosuch"], "both refuse"),
     ]
 
     bad = 0
+    # The panel is the biggest query and the one the app lives on, so it is
+    # compared even though only one side has it as a command.
+    pc, po, _ = python_panel(env)
+    sc, so, se = run(SWIFT, ["--json", "panel"], env)
+    if pc != 0 or sc != 0:
+        print(f"DIFFERENT  panel  (python exit {pc}, swift exit {sc})\n  {se}")
+        bad_panel = 1
+    else:
+        a, b = normalise(po), normalise(so)
+        bad_panel = 0 if a == b else 1
+        if bad_panel:
+            print("DIFFERENT  panel")
+            for line in _diff(a, b):
+                print("   " + line)
+        else:
+            print("same       panel")
+
     for args, expect in questions:
         pc, po, pe = run(PY, args, env)
         sc, so, se = run(SWIFT, args, env)
@@ -103,7 +145,9 @@ def main():
             # The words matter: a person reads them to decide what to do next.
             pk, sk = (pe or po).lower(), (se or so).lower()
             gist = [w for w in ("still open", "requires evidence", "unknown criterion",
-                                "no exit criteria", "unknown state") if w in pk]
+                                "no exit criteria", "unknown state",
+                                "already open for work", "approve its goal",
+                                "can be rejected", "no such node") if w in pk]
             if gist and not all(w in sk for w in gist):
                 print(f"DIFFERENT  {name}")
                 print(f"  python said: {pe or po}")
@@ -122,12 +166,14 @@ def main():
         else:
             print(f"same       {name}")
 
+    bad += bad_panel
+    total = len(questions) + 1
     shutil.rmtree(tmp, ignore_errors=True)
     print()
     if bad:
-        print(f"{bad} of {len(questions)} answers differ")
+        print(f"{bad} of {total} answers differ")
         return 1
-    print(f"all {len(questions)} answers match")
+    print(f"all {total} answers match")
     return 0
 
 

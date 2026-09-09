@@ -182,6 +182,86 @@ do {
             }
         }
 
+    case "frontier":
+        let ids = try store.frontier()
+        // The Python hands back id, title and parent for each, not bare ids,
+        // because a list of ids is not something a person can read.
+        let rows: [[String: Any]] = try ids.map { id in
+            let n = try store.node(id)
+            return ["id": id, "title": n?.title ?? "",
+                    "parent": n?.parent as Any? ?? NSNull()]
+        }
+        if wantsJSON { emit(rows) }
+        else if ids.isEmpty { print("nothing is runnable. Everything is waiting, blocked, or done.") }
+        else {
+            print("Runnable now (\(ids.count)):")
+            for id in ids { print("  \(id)   \(try store.node(id)?.title ?? "")") }
+        }
+
+    case "approve":
+        guard let name = args.first else { fail("which goal?") }
+        let n = try store.approve(goal: try resolve(name), actor: actor, note: note)
+        if wantsJSON { emit(["goal": n.id, "state": n.state]) }
+        else { print("\(n.id) approved.") }
+
+    case "reject":
+        guard let name = args.first else { fail("which goal?") }
+        let why = flag("-w") ?? flag("--why")
+        let removed = try store.reject(goal: try resolve(name), actor: actor, note: why)
+        if wantsJSON { emit(["goal": removed.first ?? "", "removed": removed]) }
+        else { print("\(removed.first ?? "") rejected, with its \(removed.count - 1) tasks.") }
+
+    case "remove":
+        guard let name = args.first else { fail("which node?") }
+        let removed = try store.remove(node: try resolve(name), actor: actor)
+        if wantsJSON { emit(["removed": removed]) }
+        else { print("removed \(removed.count): " + removed.joined(separator: ", ")) }
+
+    case "panel":
+        // The Python serves this over HTTP rather than from the command line.
+        // It is here so the comparison can check the biggest query of the lot,
+        // which is the one the app lives on.
+        let p = try store.panel()
+        // Each list carries its own extra fields, always, even when empty.
+        // Leaving a key out when the list is empty is a different answer, and
+        // the comparison catches it: an app checking `after` for nil is not
+        // the same as one checking it for empty.
+        func base(_ x: PanelState.Item) -> [String: Any] {
+            ["id": x.id, "title": x.title, "goal": x.goal, "state": x.state,
+             "owner": x.owner as Any? ?? NSNull(),
+             "met": x.met, "total": x.total, "depth": x.depth]
+        }
+        func asking(_ x: PanelState.Item) -> [String: Any] {
+            var d = base(x)
+            d["open_criteria"] = x.openCriteria
+            d["open_ids"] = x.openIds
+            return d
+        }
+        func busy(_ x: PanelState.Item) -> [String: Any] {
+            var d = base(x)
+            d["elapsed"] = x.elapsed as Any? ?? NSNull()
+            return d
+        }
+        func planned(_ x: PanelState.Item) -> [String: Any] {
+            var d = base(x)
+            d["after"] = x.after
+            return d
+        }
+        emit([
+            "as_of": p.asOf,
+            "goals": p.goals.map { ["id": $0.id, "title": $0.title, "state": $0.state] },
+            "needs_you": p.needsYou.map(asking),
+            "running": p.running.map(busy),
+            "proposed": p.proposed.map { ["id": $0.id, "title": $0.title,
+                                          "tasks": $0.tasks.map(planned)] },
+            "thinking": [],
+            "counts": ["needs_you": p.counts.needsYou, "running": p.counts.running,
+                       "ready": p.counts.ready, "done": p.counts.done,
+                       "blocked": p.counts.blocked,
+                       "unapproved_goals": p.counts.unapprovedGoals],
+            "pill": ["dots": p.dots, "overflow": p.overflow],
+        ])
+
     case "where":
         print(store.db.path)
 
