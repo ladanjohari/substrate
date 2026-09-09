@@ -19,9 +19,21 @@ requires evidence: the file, the command output, the URL, the person who
 approved. The store refuses `done` while any criterion is open, and refuses to
 meet a criterion with no evidence. Do not work around this. It is the product.
 
+## Where the command is
+
+Installing the plugin brings the whole tool with it, not just these
+instructions. The command is `bin/substrate` inside the plugin folder:
+`${CLAUDE_PLUGIN_ROOT}/bin/substrate`. If the repo was cloned instead, it is
+`./bin/substrate` from the repo root. Either way it needs python3 and nothing
+else.
+
+The record is `store/substrate.db` sitting next to that command, so one person
+has one substrate by default. To give a project its own, set `SUBSTRATE_DB` to
+a path inside that project and every command reads and writes there instead.
+
 ## Commands
 
-Run from the substrate repo. `./bin/substrate` (add `--json` for parsing).
+Add `--json` to any of them for parsing.
 
 | Command | What it answers |
 |---|---|

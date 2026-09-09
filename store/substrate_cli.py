@@ -501,7 +501,16 @@ def next_action(conn, goals):
         return [c("Next", "bold") + f"  {len(ready)} ready for an agent",
                 "      " + c("substrate run --once", "blue")
                 + c("     one round, then stop", "dim")]
-    if goals and all(t["state"] == "done" for g in goals for t in g["tasks"]):
+    tasks = [t for g in goals for t in g["tasks"]]
+    if not tasks and goals:
+        # "all of nothing is done" is true and useless. A goal with no tasks
+        # has not finished, it has not started.
+        g = goals[0]["id"]
+        return [c("Next", "bold") + "  this goal has no tasks yet",
+                "      " + c(f'substrate decompose "{goals[0]["title"]}"', "amber")
+                + c("   let the AI propose them", "dim"),
+                "      " + c(f'substrate add {g}/<slug> "A task" -c "what closes it"', "dim")]
+    if tasks and all(t["state"] == "done" for t in tasks):
         return [c("Every task is done.", "green", "bold")]
     return []
 
