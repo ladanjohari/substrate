@@ -62,12 +62,98 @@ CRASHES = ("Traceback", "NameError", "AttributeError", "TypeError:",
            "KeyError", "IndentationError", "sqlite3.")
 
 
+def check_internal_callers():
+    """One command calling another must hand it arguments it can use.
+
+    `decompose` ends by drawing the tree, with its own parsed arguments, which
+    do not carry the tree command's flags. Reaching for one of those directly
+    crashed a command that had just spent half a minute working. There are no
+    AI calls here, so this is the one thing the run below cannot exercise.
+    """
+    import ast
+    src = (CLI.resolve().parent.parent / "store" / "substrate_cli.py").read_text()
+    tree = ast.parse(src)
+    funcs = {n.name: n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef) and n.name.startswith("cmd_")}
+
+    # What each subcommand actually puts on the namespace, and what the top
+    # level puts on every namespace.
+    def arg_name(call):
+        for a in call.args:
+            if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                if a.value.startswith("--"):
+                    return a.value[2:].replace("-", "_")
+                if not a.value.startswith("-"):
+                    return a.value.replace("-", "_")
+        return None
+
+    defined, always = {}, {"cmd", "json"}
+    current = None
+    for node in ast.walk(funcs.get("main") or tree):
+        pass
+    main_fn = next((n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
+    if main_fn:
+        for node in ast.walk(main_fn):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if not isinstance(fn, ast.Attribute):
+                continue
+            if fn.attr == "add_parser" and node.args:
+                first = node.args[0]
+                if isinstance(first, ast.Constant):
+                    current = first.value
+                    defined.setdefault(current, set())
+            elif fn.attr == "add_argument":
+                name = arg_name(node)
+                if not name:
+                    continue
+                if getattr(fn.value, "id", None) == "p":
+                    always.add(name)      # on the top level: always present
+                elif current:
+                    defined[current].add(name)
+
+    problems = []
+    for name, fn in funcs.items():
+        caller_cmd = name[len("cmd_"):].replace("_", "-")
+        has = always | defined.get(caller_cmd, set()) | defined.get(name[4:], set())
+        # Anything the caller assigns itself before handing the namespace over
+        # is present too.
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign):
+                for t in node.targets:
+                    if isinstance(t, ast.Attribute) and getattr(t.value, "id", None) == "a":
+                        has.add(t.attr)
+        for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
+            callee = getattr(call.func, "id", None)
+            if callee not in funcs or callee == name:
+                continue
+            for attr in (n for n in ast.walk(funcs[callee])
+                         if isinstance(n, ast.Attribute)
+                         and getattr(n.value, "id", None) == "a"):
+                if attr.attr in has:
+                    continue
+                problems.append(
+                    f"{name} hands its arguments to {callee}, which reads "
+                    f"a.{attr.attr}. {caller_cmd} does not define it, so that "
+                    f"crashes. Use getattr(a, \"{attr.attr}\", <default>).")
+    return sorted(set(problems))
+
+
 def run(args, env):
     p = subprocess.run([str(CLI)] + args, capture_output=True, text=True, env=env)
     return p.returncode, (p.stdout + p.stderr)
 
 
 def main():
+    crossed = check_internal_callers()
+    if crossed:
+        for line in crossed:
+            print("FAILED  " + line)
+        print(f"{len(crossed)} command(s) hand arguments to a command that cannot take them")
+        return 1
+
     tmp = tempfile.mkdtemp(prefix="substrate-check-")
     env = {**os.environ, "SUBSTRATE_DB": str(Path(tmp) / "check.db"),
            "NO_COLOR": "1", "SUBSTRATE_ACTOR": "check"}

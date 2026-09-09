@@ -572,9 +572,14 @@ def cmd_tree(conn, a):
     lines, payload = [], []
     for g in goals:
         nodes = {n["id"]: n for n in t["nodes"]}
-        draw = render_goal if a.brief else render_goal_full
+        # getattr, not a.brief: `decompose` ends by showing the tree and hands
+        # over its own arguments, which have no --brief on them. Reaching for
+        # the attribute directly crashed the command that had just done half a
+        # minute of work.
+        brief = getattr(a, "brief", False)
+        draw = render_goal if brief else render_goal_full
         lines += (draw(g, kids_of, blockers, open_blockers)
-                  if a.brief else
+                  if brief else
                   draw(g, kids_of, blockers, open_blockers, nodes)) + [""]
         payload.append(dict(g, tasks=[n for n in t["nodes"]
                                       if n["parent"] and n["id"].startswith(g["id"] + "/")]))
@@ -790,7 +795,7 @@ def main():
 
     a = p.parse_args()
     if a.cmd is None:
-        a.cmd, a.goal, a.brief = "tree", None, False
+        a.cmd, a.goal = "tree", None
     conn = store.db()
     dispatch = {
         "decompose": cmd_decompose, "approve": cmd_approve, "run": cmd_run,
