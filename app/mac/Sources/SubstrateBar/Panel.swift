@@ -53,6 +53,8 @@ struct Panel: Decodable, Equatable {
         let sentence: String
         let state: String
         let error: String?
+        /// The goal being thought again, or nil for a brand new one.
+        var goal: String?
         var failed: Bool { state == "failed" }
     }
 

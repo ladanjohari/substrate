@@ -407,7 +407,7 @@ def cmd_changes(conn, a):
         raise SystemExit('say what should change: substrate changes '
                          + goal + ' "two tasks, not five"')
     import decompose
-    plan = decompose.reshape(goal, note)
+    plan = decompose.reshape(goal, note, actor())
     lines = [f"{goal} replanned. {len(plan['tasks'])} tasks now:"]
     for t in plan["tasks"]:
         after = ", ".join(t.get("blocked_by") or []) or "nothing"

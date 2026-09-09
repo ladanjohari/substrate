@@ -37,9 +37,9 @@ than asserted.
 
 import json
 import os
-import re
 import sqlite3
 import sys
+import threading
 import traceback
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -508,6 +508,10 @@ def approve(conn, goal, actor, note=None):
             raise ValueError(f"{goal} is already open for work, it needs no approval")
         raise ValueError(f"{goal} is {row['state']}, and only a plan waiting for you "
                          f"can be approved")
+    # The plan on screen is not the plan any more once a replan is running,
+    # and approving here would race the tasks being replaced.
+    if any(t["goal"] == goal and t["state"] == "thinking" for t in _thinking_snapshot()):
+        raise ValueError(f"{goal} is being thought again; wait for the new plan")
     append_event(conn, goal, "working", actor,
                  note or "approved; the runner may start")
     return {"goal": goal, "state": "working"}
@@ -533,6 +537,53 @@ def reject(conn, goal, actor, note=None):
     removed = remove_node(conn, goal, actor,
                           "rejected: " + why if why else "rejected")
     return {"goal": goal, "removed": removed, "why": why or None}
+
+
+def check_reshapable(conn, goal):
+    """Say whether a plan can be changed, or why it cannot.
+
+    Both entry points call this: the store, so it can refuse before spawning
+    anything, and the decomposer, which is where the work actually happens.
+    One copy, because two copies is how the approve rule drifted.
+    """
+    row = conn.execute("SELECT state, parent FROM nodes WHERE id=? AND removed=0",
+                       (goal,)).fetchone()
+    if not row:
+        raise ValueError(f"unknown goal: {goal}")
+    if row["parent"]:
+        raise ValueError(f"{goal} is a task; ask for changes on its goal: {row['parent']}")
+    if row["state"] != "waiting":
+        raise ValueError(f"{goal} is {row['state']}, and only a plan waiting for you "
+                         f"can be changed")
+    return row
+
+
+def record_change_request(conn, goal, actor, note):
+    """Write down what was asked for, before the model is called.
+
+    Written here and nowhere else, so asking from the terminal and asking from
+    the app leave the same record. They did not before: the app wrote this
+    line and the command line wrote nothing.
+    """
+    note = (note or "").strip()
+    if not note:
+        raise ValueError("say what should change")
+    append_event(conn, goal, "waiting", actor, "asked for changes: " + note)
+
+
+def descendants(conn, node):
+    """Every task under a node, at any depth, deepest first.
+
+    A goal's tasks can have tasks of their own. Anything that walks only the
+    direct children leaves the deeper ones behind, pointing at a parent that
+    no longer exists.
+    """
+    out = []
+    for kid in conn.execute("SELECT id FROM nodes WHERE parent=? AND removed=0",
+                            (node,)).fetchall():
+        out += descendants(conn, kid["id"])
+        out.append(kid["id"])
+    return out
 
 
 def claim(conn, node, actor):
@@ -715,7 +766,7 @@ def panel(conn):
     # A goal typed in is not a plan yet: one AI call stands between them, and
     # it takes about half a minute. The panel carries that half minute so the
     # app can say "working it out" instead of looking like it did nothing.
-    thinking = sorted((t for t in THINKING.values()
+    thinking = sorted((t for t in _thinking_snapshot()
                        if t["state"] in ("thinking", "failed")),
                       key=lambda t: t["id"])
 
@@ -808,18 +859,41 @@ def call(path, payload=None):
 # decomposer itself and keeps the in-flight sentences here so a page can say
 # "thinking" instead of looking broken for the half minute the AI call takes.
 THINKING = {}
+# Background threads add to and remove from THINKING while /panel reads it.
+# Without this, a poll that lands mid-removal raises "dictionary changed size
+# during iteration", the store answers 500, and the app reports itself offline
+# when nothing is wrong.
+THINKING_LOCK = threading.Lock()
 RUNNER_BEAT = Path(__file__).parent / "runner.beat"
+
+
+def _thinking_snapshot():
+    with THINKING_LOCK:
+        return [dict(t) for t in THINKING.values()]
+
+
+def _new_thinking(sentence, goal=None):
+    """Start one in-flight entry and hand back its key."""
+    key = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+    with THINKING_LOCK:
+        THINKING[key] = {"id": key, "sentence": sentence, "state": "thinking",
+                         "error": None, "goal": goal}
+    return key
+
+
+def _thinking_update(key, **fields):
+    """Update one entry, unless it has already been dismissed."""
+    with THINKING_LOCK:
+        if key in THINKING:
+            THINKING[key].update(fields)
 
 
 def start_decompose(sentence):
     import subprocess as sp
-    import threading
     sentence = (sentence or "").strip()
     if not sentence:
         raise ValueError("a goal needs a sentence")
-    key = str(int(datetime.now(timezone.utc).timestamp() * 1000))
-    THINKING[key] = {"id": key, "sentence": sentence, "state": "thinking",
-                     "error": None, "goal": None}
+    key = _new_thinking(sentence, goal=None)
 
     def run():
         try:
@@ -828,65 +902,53 @@ def start_decompose(sentence):
         except sp.TimeoutExpired:
             # Without this the thread dies silently and the entry says
             # "thinking" for ever, which reads as the app being stuck.
-            THINKING[key].update(state="failed",
-                                 error="the model took longer than five minutes")
+            _thinking_update(key, state="failed",
+                             error="the model took longer than five minutes")
             return
         if proc.returncode != 0:
-            THINKING[key].update(
-                state="failed", error=(proc.stderr or proc.stdout or "").strip()[-400:])
+            _thinking_update(
+                key, state="failed",
+                error=(proc.stderr or proc.stdout or "").strip()[-400:])
             return
         # The goal is in the database before the decomposer exits, so dropping
         # the entry here cannot leave a gap: the plan is already on the panel.
-        m = re.search(r"proposed goal stored: (\S+)", proc.stdout)
-        THINKING[key].update(state="done", goal=m.group(1) if m else None)
-        THINKING.pop(key, None)
+        forget_thinking(key)
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True, "id": key}
 
 
-def start_reshape(goal, note):
-    """Ask for changes: record the ask, then re-plan in the background.
+def start_reshape(goal, note, actor="unknown"):
+    """Ask for changes, then re-plan in the background.
 
-    The note is written to the log before the model is called, so the reason
-    survives even if the call fails. The wait then shows in the panel the same
-    way a new goal does.
+    Refused here if the plan cannot be changed, so the app hears no rather
+    than watching a spinner. The note itself is written down by the
+    decomposer, in one place, so asking from the terminal records the same
+    thing as asking from the app.
     """
     import subprocess as sp
-    import threading
     note = (note or "").strip()
     if not note:
         raise ValueError("say what should change")
-    conn = db()
-    row = conn.execute("SELECT state, parent FROM nodes WHERE id=? AND removed=0",
-                       (goal,)).fetchone()
-    if not row:
-        raise ValueError(f"unknown goal: {goal}")
-    if row["parent"]:
-        raise ValueError(f"{goal} is a task; ask for changes on its goal: {row['parent']}")
-    if row["state"] != "waiting":
-        raise ValueError(f"{goal} is {row['state']}, and only a plan waiting for you "
-                         f"can be changed")
-    append_event(conn, goal, "waiting", "you", "asked for changes: " + note)
+    check_reshapable(db(), goal)
 
-    key = str(int(datetime.now(timezone.utc).timestamp() * 1000))
-    THINKING[key] = {"id": key, "sentence": note, "state": "thinking",
-                     "error": None, "goal": goal}
+    key = _new_thinking(note, goal=goal)
 
     def run():
         try:
             proc = sp.run(["python3", str(Path(__file__).parent / "decompose.py"),
-                           "--reshape", goal, note],
+                           "--reshape", goal, "--actor", actor, note],
                           capture_output=True, text=True, timeout=300)
         except sp.TimeoutExpired:
-            THINKING[key].update(state="failed",
-                                 error="the model took longer than five minutes")
+            _thinking_update(key, state="failed",
+                             error="the model took longer than five minutes")
             return
         if proc.returncode != 0:
-            THINKING[key].update(
-                state="failed", error=(proc.stderr or proc.stdout or "").strip()[-400:])
+            _thinking_update(
+                key, state="failed",
+                error=(proc.stderr or proc.stdout or "").strip()[-400:])
             return
-        THINKING.pop(key, None)
+        forget_thinking(key)
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True, "id": key, "goal": goal}
@@ -894,7 +956,8 @@ def start_reshape(goal, note):
 
 def forget_thinking(key):
     """Drop a failed attempt once the person has read why it failed."""
-    THINKING.pop(str(key), None)
+    with THINKING_LOCK:
+        THINKING.pop(str(key), None)
     return {"ok": True}
 
 
@@ -963,11 +1026,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(criteria_for(conn, node))
             return
         if self.path == "/status":
+            snap = _thinking_snapshot()
             self._send({"runner": runner_state(),
-                        "thinking": [t for t in THINKING.values()
-                                     if t["state"] == "thinking"],
-                        "failed": [t for t in THINKING.values()
-                                   if t["state"] == "failed"]})
+                        "thinking": [t for t in snap if t["state"] == "thinking"],
+                        "failed": [t for t in snap if t["state"] == "failed"]})
             return
         if self.path == "/tree":
             self._send(tree(conn))
@@ -1020,7 +1082,7 @@ class Handler(BaseHTTPRequestHandler):
                                          payload.get("note")))
             elif self.path == "/goal/reshape":
                 return self._send(start_reshape(payload["goal"],
-                                                payload.get("note", "")))
+                                                payload.get("note", ""), actor))
             elif self.path == "/goal/forget":
                 return self._send(forget_thinking(payload.get("id", "")))
             else:

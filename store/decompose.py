@@ -158,33 +158,59 @@ def write_tasks(conn, gid, tasks):
                              (f"{gid}/{b}", f"{gid}/{t['id']}"))
 
 
-def reshape(goal_id, note):
+def reshape(goal_id, note, actor="unknown"):
     """Re-plan one goal, keeping the goal and replacing its tasks.
 
     The goal's own title, intent and exit criterion are left alone. Wanting a
     different thing is a different goal, and rejecting this one and typing
     that one says so plainly. This is for changing how it will be done.
+
+    Both the terminal and the app come through here, so the note is written
+    down here too. It used to be written by the app's path only, which meant
+    asking from the terminal left no record of why the plan changed.
     """
     from pathlib import Path as _P
     sys.path.insert(0, str(_P(__file__).parent))
     import substrate_store as s
 
     conn = s.db()
+    try:
+        s.check_reshapable(conn, goal_id)
+    except ValueError as e:
+        sys.exit(str(e))
     g = conn.execute("SELECT * FROM nodes WHERE id=? AND removed=0",
                      (goal_id,)).fetchone()
-    if not g:
-        sys.exit(f"unknown goal: {goal_id}")
-    if g["state"] != "waiting":
-        sys.exit(f"{goal_id} is {g['state']}; only a plan waiting for you can be reshaped")
 
-    old = [dict(r) for r in conn.execute(
-        "SELECT * FROM nodes WHERE parent=? AND removed=0 ORDER BY id", (goal_id,))]
+    # Every task under the goal, however deep. Walking only the direct
+    # children left subtasks behind, pointing at a parent row that had just
+    # been deleted.
+    old_ids = s.descendants(conn, goal_id)
+    old = [dict(conn.execute("SELECT * FROM nodes WHERE id=?", (i,)).fetchone())
+           for i in old_ids]
+
+    # A task that has been worked on is never thrown away. Being created is
+    # not work: every task has a creation event, so counting those would
+    # refuse to reshape any plan a person had added a task to. What counts is
+    # leaving idle, or a check that somebody has already answered.
+    for t in old:
+        worked = conn.execute(
+            "SELECT 1 FROM events WHERE node=? AND to_state!='idle'", (t["id"],)).fetchone()
+        answered = conn.execute(
+            "SELECT 1 FROM criteria WHERE node=? AND state!='unmet'", (t["id"],)).fetchone()
+        if worked or answered:
+            sys.exit(f"{t['id']} has already been worked on; reshaping would lose that")
+
     lines = []
     for t in old:
+        if t["parent"] != goal_id:
+            continue  # the model is shown the top level, which is what it wrote
         after = [x["blocker"].split("/")[-1] for x in conn.execute(
             "SELECT blocker FROM edges WHERE blocked=?", (t["id"],))]
         lines.append(f"- {t['id'].split('/')[-1]}: {t['title']}"
                      + (f"  [after: {', '.join(after)}]" if after else ""))
+
+    s.record_change_request(conn, goal_id, actor, note)
+    conn.commit()
 
     # Said here, after the checks, so a refusal never comes with a line
     # claiming the model is already thinking about it.
@@ -195,12 +221,8 @@ def reshape(goal_id, note):
     if not plan.get("tasks"):
         sys.exit("the model came back with no tasks, so the old plan is left alone")
 
-    # A task that has history is never thrown away. Nothing has run on an
-    # unapproved plan, so there is nothing to lose here, and checking rather
-    # than assuming is what keeps that true.
-    for t in old:
-        if conn.execute("SELECT 1 FROM events WHERE node=?", (t["id"],)).fetchone():
-            sys.exit(f"{t['id']} already has history; reshaping would lose it")
+    # descendants() returns deepest first, so a child is always gone before
+    # its parent.
     for t in old:
         conn.execute("DELETE FROM edges WHERE blocker=? OR blocked=?", (t["id"], t["id"]))
         conn.execute("DELETE FROM criteria WHERE node=?", (t["id"],))
@@ -246,10 +268,16 @@ if __name__ == "__main__":
         sys.exit('usage: decompose.py "the goal, in one sentence"'
                  ' | --json plan.json | --reshape <goal> "what should change"')
     if sys.argv[1] == "--reshape":
-        if len(sys.argv) < 4:
+        argv = sys.argv[2:]
+        actor = "unknown"
+        if "--actor" in argv:
+            i = argv.index("--actor")
+            actor = argv[i + 1] if i + 1 < len(argv) else "unknown"
+            argv = argv[:i] + argv[i + 2:]
+        if len(argv) < 2:
             sys.exit('usage: decompose.py --reshape <goal> "what should change"')
-        gid = sys.argv[2]
-        out = reshape(gid, " ".join(sys.argv[3:]))
+        gid = argv[0]
+        out = reshape(gid, " ".join(argv[1:]), actor)
         print(f"replanned goal: {gid}")
         for t in out["tasks"]:
             blockers = ", ".join(t.get("blocked_by") or []) or "none"

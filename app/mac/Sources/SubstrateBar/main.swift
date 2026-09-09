@@ -54,11 +54,13 @@ func demoPlan() -> Panel {
 /// where that half minute produced nothing.
 @MainActor
 func demoThinking(failed: Bool) -> Panel {
-    var p = Panel()
+    // Built on top of a busy panel on purpose: the card must sit above real
+    // work rather than hiding it, which is what it used to do.
+    var p = demoPanel()
     p.thinking = [.init(id: "1", sentence: "Write my resume",
                         state: failed ? "failed" : "thinking",
                         error: failed ? "the claude command could not run: Failed to authenticate. If it says authenticate: open a terminal, run `claude`, log in, try again" : nil)]
-    p.pill = .init(dots: [failed ? "error" : "working"], overflow: 0)
+    p.pill = .init(dots: failed ? ["needs", "error"] : ["needs", "working"], overflow: 1)
     return p
 }
 

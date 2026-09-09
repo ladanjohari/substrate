@@ -142,6 +142,18 @@ so an app can show the half minute the model takes instead of looking idle.
 
 Start the service with `python3 store/substrate_store.py serve 8040`.
 
+## Checking it still works
+
+```
+./bin/substrate-check
+```
+
+Runs every command form against a throwaway database and says so if any of
+them breaks. No AI calls, no network, and it never touches your own database.
+It exists because `substrate` on its own once shipped broken: the change that
+broke it was tested by running the commands the change was about, which is not
+the same as running the commands that still have to work.
+
 ## The Claude skill
 
 `skills/substrate/SKILL.md` teaches a Claude Code session to attach to the

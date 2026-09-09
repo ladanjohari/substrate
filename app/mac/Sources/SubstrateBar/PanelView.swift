@@ -25,6 +25,10 @@ struct PanelView: View {
     /// The three answers to a plan, and which one you are part way through.
     private enum Answer { case none, changes, reject }
     @State private var answer: Answer = .none
+    /// Which goal the open box belongs to. Without this, a plan approved
+    /// elsewhere can slide the next one under a box already half filled in,
+    /// and the note lands on the wrong goal.
+    @State private var answerFor: String?
     @State private var answerText = ""
     @FocusState private var answerField: Bool
 
@@ -39,30 +43,15 @@ struct PanelView: View {
             if store.offline {
                 message("The store is not running",
                         "Start it with: python3 store/substrate_store.py serve 8040")
-            } else if let bad = p.thinking.first(where: { $0.failed }) {
-                didNotPlan(bad)
-            } else if let busy = p.thinking.first {
-                working(busy)
-            } else if p.goals.isEmpty {
-                message("Nothing on the go",
-                        "Describe something you want done and it becomes a plan you can approve.")
-            } else if let waiting = p.proposed.first {
-                // A plan waiting for you is the only thing that matters until
-                // you answer it, so it takes the whole panel. Only a long plan
-                // scrolls: a ScrollView wrapping content that fits adds nothing
-                // and cannot be captured for review.
-                if waiting.tasks.count > 10 {
-                    ScrollView { plan(waiting) }.frame(maxHeight: 440)
-                } else {
-                    plan(waiting)
-                }
-            } else if rows > 8 {
-                // Only a long list scrolls. A short one lays itself out
-                // directly, which is the common case and the one that can be
-                // captured for review.
-                ScrollView { content }.frame(maxHeight: 420)
             } else {
-                content
+                // A wait, and a failure, are cards at the top of whatever else
+                // is going on. They used to take the whole panel, so one
+                // failure nobody had dismissed hid every task that needed a
+                // person, which is the one thing this panel exists to show.
+                ForEach(p.thinking) { t in
+                    if t.failed { didNotPlan(t) } else { working(t) }
+                }
+                body(below: p.thinking.isEmpty)
             }
 
             if canCompose && showField { composer }
@@ -72,6 +61,44 @@ struct PanelView: View {
         }
         .frame(width: Self.width)
         .padding(.vertical, 5)
+    }
+
+    /// Everything under the cards: the plan to answer, or the live work.
+    @ViewBuilder private func body(below quiet: Bool) -> some View {
+        if p.goals.isEmpty {
+            // Only when nothing is in flight, or "nothing on the go" would sit
+            // under a card that is plainly doing something.
+            if quiet {
+                message("Nothing on the go",
+                        "Describe something you want done and it becomes a plan you can approve.")
+            }
+        } else if let waiting = planToAnswer {
+            // Only a long plan scrolls: a ScrollView wrapping content that fits
+            // adds nothing and cannot be captured for review.
+            if waiting.tasks.count > 10 {
+                ScrollView { plan(waiting) }.frame(maxHeight: 440)
+            } else {
+                plan(waiting)
+            }
+        } else if rows > 8 {
+                // Only a long list scrolls. A short one lays itself out
+                // directly, which is the common case and the one that can be
+                // captured for review.
+            ScrollView { content }.frame(maxHeight: 420)
+        } else {
+            content
+        }
+    }
+
+    /// The plan you are being asked to answer, if answering it makes sense.
+    ///
+    /// While a goal is being thought again the plan on screen is not the plan
+    /// any more, so it is not offered. The store refuses such an approval too;
+    /// this is so the button is never there to press.
+    private var planToAnswer: Panel.Proposed? {
+        guard let g = p.proposed.first else { return nil }
+        if p.thinking.contains(where: { !$0.failed && $0.goal == g.id }) { return nil }
+        return g
     }
 
     private var header: some View {
@@ -89,9 +116,11 @@ struct PanelView: View {
     /// The one line of state, in the order a person cares about it.
     private var summary: String {
         let c = p.counts
+        // A task waiting on a person outranks everything, including a plan
+        // that failed. Both need you; the count says more.
+        if c.needs_you > 0 { return "\(c.needs_you) needs you" }
         if p.thinking.contains(where: { $0.failed }) { return "could not plan it" }
         if !p.thinking.isEmpty { return "working it out" }
-        if c.needs_you > 0 { return "\(c.needs_you) needs you" }
         if c.running > 0 { return "\(c.running) running" }
         if c.unapproved_goals > 0 { return "not approved yet" }
         if c.done > 0 && c.ready == 0 && c.blocked == 0 { return "done" }
@@ -173,17 +202,23 @@ struct PanelView: View {
     /// The half minute between a sentence and a plan. Saying nothing here
     /// would look like the app had ignored you.
     private func working(_ t: Panel.Thinking) -> some View {
-        VStack(spacing: 7) {
-            ProgressView().controlSize(.small)
-            Text("Working out the plan").font(.system(size: 13, weight: .medium))
-            Text(t.sentence).font(.system(size: 12)).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("One AI call, about half a minute.")
-                .font(.system(size: 11)).foregroundStyle(.tertiary)
+        // A card, the same shape as a failure, because it now sits above
+        // whatever else is happening rather than replacing it.
+        HStack(alignment: .top, spacing: 9) {
+            ProgressView().controlSize(.small).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t.goal == nil ? "Working out the plan" : "Thinking it through again")
+                    .font(.system(size: 13, weight: .medium))
+                Text(t.sentence).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("One AI call, about half a minute.")
+                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 14).padding(.vertical, 16)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.09)))
+        .padding(.horizontal, Self.sidePad).padding(.vertical, 5)
     }
 
     /// It failed, so say what it said. The sentence is kept, because retyping
@@ -259,12 +294,12 @@ struct PanelView: View {
     /// discarded without a reason teaches the record nothing, and one press
     /// away from destroying a plan is one press too few.
     @ViewBuilder private func answers(_ g: Panel.Proposed) -> some View {
-        switch answer {
+        switch answerFor == g.id ? answer : .none {
         case .none:
             HStack(spacing: 8) {
                 Spacer()
-                Button("Reject") { open(.reject) }.controlSize(.small)
-                Button("Ask for changes") { open(.changes) }.controlSize(.small)
+                Button("Reject") { open(.reject, for: g.id) }.controlSize(.small)
+                Button("Ask for changes") { open(.changes, for: g.id) }.controlSize(.small)
                 Button("Approve") { approve(g) }
                     .controlSize(.small).keyboardShortcut(.defaultAction)
             }
@@ -313,8 +348,9 @@ struct PanelView: View {
         .padding(.horizontal, Self.contentPad).padding(.top, 10)
     }
 
-    private func open(_ a: Answer) {
+    private func open(_ a: Answer, for goal: String) {
         answer = a
+        answerFor = goal
         answerText = ""
         lastError = nil
         answerField = true
@@ -322,6 +358,7 @@ struct PanelView: View {
 
     private func close() {
         answer = .none
+        answerFor = nil
         answerText = ""
         lastError = nil
     }
