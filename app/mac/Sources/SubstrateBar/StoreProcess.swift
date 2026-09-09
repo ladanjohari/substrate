@@ -13,9 +13,12 @@ final class StoreProcess {
 
     /// Walks up from the running binary to the repo, looking for the store.
     ///
+    /// Nonisolated because Record asks for it while working out which file to
+    /// open, which happens before anything is on screen.
+    ///
     /// Inside an app bundle that walk ends at the bundle, so the build leaves
     /// a marker naming where the repo is and this reads that first.
-    static func find() -> URL? {
+    nonisolated static func find() -> URL? {
         if let marker = Bundle.main.url(forResource: "repo-path", withExtension: nil),
            let text = try? String(contentsOf: marker, encoding: .utf8) {
             let repo = URL(fileURLWithPath:
@@ -62,6 +65,13 @@ final class StoreProcess {
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = ["python3", script.path, "serve", String(port)]
         p.currentDirectoryURL = script.deletingLastPathComponent().deletingLastPathComponent()
+        // Say which record, rather than letting the child inherit whatever the
+        // app happened to be launched with. Choosing a different one in the
+        // panel has to reach the store, or the app and its store would be
+        // looking at two different files.
+        var env = ProcessInfo.processInfo.environment
+        env["SUBSTRATE_DB"] = Record.path
+        p.environment = env
         // The store's own output would otherwise land in whatever launched the
         // app, which for a double-click is nowhere useful.
         p.standardOutput = FileHandle.nullDevice
@@ -91,6 +101,9 @@ final class StoreProcess {
             signals.append(src)
         }
     }
+
+    /// True when the store on the port is the one this app started.
+    var isOurs: Bool { child != nil }
 
     /// Only stops what this app started. A store someone else is running, in a
     /// window they can see, is not ours to kill.

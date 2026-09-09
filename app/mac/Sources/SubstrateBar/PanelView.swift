@@ -9,6 +9,7 @@ struct PanelView: View {
     @ObservedObject var store: Store
     var onOpenTree: () -> Void
     var onQuit: () -> Void
+    var onSwitchRecord: () -> Void = {}
 
     private static let width: CGFloat = 368
     private static let sidePad: CGFloat = 5
@@ -115,7 +116,16 @@ struct PanelView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
             Spacer()
-            Text(summary).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(summary).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                // Silence when it is the usual record, a name when it is not.
+                // Same dots, same app, entirely different content, and nothing
+                // used to say which.
+                if Record.name != "your record" {
+                    Text(Record.name).font(.system(size: 10))
+                        .foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
         }
         .padding(.horizontal, Self.contentPad)
         .padding(.top, 6).padding(.bottom, 8)
@@ -494,6 +504,12 @@ struct PanelView: View {
         .frame(maxWidth: .infinity).padding(.horizontal, 14).padding(.vertical, 18)
     }
 
+    /// Two actions and a menu.
+    ///
+    /// Everything wanted a place here and five links did not fit in 368
+    /// points, so the settings went behind one control: which record you are
+    /// in, opening a different one, and opening at login. Those are decided
+    /// rarely; starting a goal and reading the tree are not.
     private var footer: some View {
         HStack(spacing: 13) {
             if canCompose && !showField {
@@ -503,20 +519,37 @@ struct PanelView: View {
                 }
             }
             action("Open the full tree", tint: Color.secondary, run: onOpenTree)
-            // Only offered when it can actually work. Run from swift build
-            // there is no bundle for macOS to register, and a switch that
-            // always fails is worse than no switch.
+            Spacer()
+            settings
+            action("Quit", tint: Color.secondary, run: onQuit)
+        }
+        .padding(.horizontal, Self.contentPad).padding(.top, 7).padding(.bottom, 2)
+    }
+
+    private var settings: some View {
+        Menu {
+            Section("Record") {
+                Text(Record.name)
+                Button("Open another record...") { onSwitchRecord() }
+            }
+            // Only offered when it can work. Run from swift build there is no
+            // bundle for macOS to register, and a switch that always fails is
+            // worse than no switch.
             if LoginItem.available {
-                action(atLogin ? "Opens at login" : "Open at login",
-                       tint: atLogin ? Color.accentColor : Color.secondary) {
+                Divider()
+                Button(atLogin ? "Do not open at login" : "Open at login") {
                     if let problem = LoginItem.set(!atLogin) { lastError = problem }
                     else { atLogin = LoginItem.on; lastError = nil }
                 }
             }
-            Spacer()
-            action("Quit", tint: Color.secondary, run: onQuit)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, Self.contentPad).padding(.top, 7).padding(.bottom, 2)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     private func action(_ title: String, tint: Color,

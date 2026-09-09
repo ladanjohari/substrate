@@ -198,7 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = NSHostingController(
             rootView: PanelView(store: store,
                                 onOpenTree: { [weak self] in self?.openTree() },
-                                onQuit: { NSApp.terminate(nil) }))
+                                onQuit: { NSApp.terminate(nil) },
+                                onSwitchRecord: { [weak self] in self?.switchRecord() }))
         // Tell the popover how big the panel wants to be.
         //
         // Without this the popover opens at some default size, then the
@@ -307,6 +308,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         treeWindow?.makeKeyAndOrderFront(nil)
         close()
+    }
+
+    /// Open a different record, without a terminal.
+    ///
+    /// The store the app started is looking at the old file, so it has to go
+    /// and come back. A store somebody else started is left alone, and in that
+    /// case this says so rather than pretending to have switched.
+    private func switchRecord() {
+        if Record.fixedByEnvironment {
+            say("SUBSTRATE_DB is set in the window that launched this, so it wins. "
+                + "Quit, and open the app without it to choose here.")
+            return
+        }
+        guard Record.choose() != nil else { return }
+        if storeProcess.isOurs {
+            storeProcess.stopIfOurs()
+            storeProcess.startIfNeeded()
+        } else {
+            say("Now looking at \(Record.name). The store already running was "
+                + "started by somebody else and is still on the old record, so "
+                + "quit that one and this will start its own.")
+        }
+        store.poll()
+        close()
+    }
+
+    private func say(_ text: String) {
+        let a = NSAlert()
+        a.messageText = "Records"
+        a.informativeText = text
+        a.alertStyle = .informational
+        NSApp.activate(ignoringOtherApps: true)
+        a.runModal()
     }
 
     @objc private func toggle() {
