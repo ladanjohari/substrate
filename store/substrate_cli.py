@@ -62,6 +62,10 @@ MARK = ({"idle": "·", "working": "▸", "waiting": "!", "error": "x", "done": "
         {"idle": ".", "working": ">", "waiting": "!", "error": "x", "done": "v"})
 CRIT = ({"unmet": "☐", "met": "☑", "failed": "☒"}
         if GLYPHS else {"unmet": "-", "met": "x", "failed": "!"})
+# The elbows that draw what a task waits on. A terminal that cannot show them
+# gets plain characters rather than boxes.
+ELBOW = ({"mid": "\u251c", "last": "\u2514"} if GLYPHS
+         else {"mid": "|", "last": "\\"})
 
 # Colour carries the same meaning it carries everywhere else in this project:
 # motion is working, amber means a person is needed, green means done. It is
@@ -213,7 +217,13 @@ def cmd_decompose(conn, a):
     a.goal = gid
     cmd_tree(conn, a)
     if not a.json:
-        print(f"\nwaiting for you. Read it, reshape it, then: substrate approve {gid}")
+        print(f"\nwaiting for you. Answer it with one of:")
+        print(c(f"    substrate approve {gid}", "amber")
+              + c("                    let agents start", "dim"))
+        print(c(f'    substrate changes {gid} "what to change"', "amber")
+              + c("   have it planned again", "dim"))
+        print(c(f"    substrate reject {gid}", "dim")
+              + c("                     throw it away", "dim"))
 
 
 def cmd_run(conn, a):
@@ -376,14 +386,110 @@ def render_goal(g, kids_of, blockers, open_blockers=None):
     return lines
 
 
+def render_goal_full(g, kids_of, blockers, open_blockers, nodes):
+    """A goal drawn so the shape of the work is visible, not summarised.
+
+    The compact form said "draft  boxes  after review, clarify". That tells
+    you a task is blocked but not what it is for, what would close it, or
+    whether the things it waits on are anywhere near ready. Three boxes are
+    not exit criteria; they are a count with the words removed.
+
+    So: every task shows what closes it, in words, and what it waits on is
+    drawn underneath it rather than named in a label.
+    """
+    lines = [f"{c(g['title'], 'bold')}   {c(g['id'], 'dim')}"]
+    if g["state"] == "waiting":
+        lines.append(c("  not approved, so nothing runs", "amber", "bold"))
+        lines.append(c(f"  substrate approve {g['id']}", "amber"))
+
+    flat = []
+    def walk(parent, depth):
+        for t in order_tasks(kids_of.get(parent, []), blockers):
+            t["_depth"] = depth
+            t["_kids"] = bool(kids_of.get(t["id"]))
+            t["_ready"] = (not open_blockers.get(t["id"]) and t["state"] == "idle"
+                           and not t["_kids"])
+            flat.append(t)
+            walk(t["id"], depth + 1)
+    walk(g["id"], 0)
+
+    if not flat:
+        lines.append(c("  no tasks yet", "dim"))
+        return lines
+    lines.append("  " + tally(flat))
+
+    room = width()
+    for t in flat:
+        st, pad = t["state"], "  " + "  " * t["_depth"]
+        name = t["id"].split("/")[-1]
+        state_line = {"done": "done", "working": "an agent is on it",
+                      "error": "error, look at the log"}.get(st, "")
+        if st == "waiting":
+            left = t["criteria_total"] - t["criteria_met"]
+            state_line = f"needs you, {left} of {t['criteria_total']} left"
+        elif st == "idle":
+            state_line = ("its parts first" if t["_kids"]
+                          else "ready for an agent" if t["_ready"] else "waiting")
+        rstyle = {"waiting": ("amber", "bold"), "done": ("green",),
+                  "working": ("blue",), "error": ("red", "bold")}.get(st, ("dim",))
+
+        lines.append("")
+        head = f"{pad}{c(MARK[st], *STATE_STYLE[st])} "
+        title = t["title"] if st != "done" else c(t["title"], "dim")
+        gap = room - len(pad) - 2 - len(t["title"]) - len(name) - len(state_line) - 5
+        if gap < 2:
+            lines.append(head + title + "  " + c(name, "dim"))
+            lines.append(pad + "  " + c(state_line, *rstyle))
+        else:
+            lines.append(head + title + "  " + c(name, "dim")
+                         + " " * gap + c(state_line, *rstyle))
+
+        # What would close it, in the words a stranger would check against.
+        for x in (t.get("criteria") or []):
+            mark = c(CRIT[x["state"]], *CRIT_STYLE[x["state"]])
+            text = x["text"] if x["state"] != "met" else c(x["text"], "dim")
+            lines.append(f"{pad}    {mark} {text}")
+        if not t.get("criteria"):
+            lines.append(f"{pad}    {c('no criteria', 'dim')}")
+
+        # What it waits on, drawn rather than named. Every blocker carries its
+        # own checks, which is the thing the old one line could not show.
+        waits = open_blockers.get(t["id"], [])
+        if waits:
+            lines.append(f"{pad}    {c('waits for', 'dim')}")
+            for i, b in enumerate(waits):
+                bn = nodes.get(b, {})
+                elbow = ELBOW["last" if i == len(waits) - 1 else "mid"]
+                met, total = bn.get("criteria_met", 0), bn.get("criteria_total", 0)
+                how = (f"{met} of {total} check{'' if total == 1 else 's'} met"
+                       if total else "no criteria")
+                bstate = bn.get("state", "idle")
+                if bstate == "working":
+                    how = "an agent is on it, " + how
+                elif bstate == "waiting":
+                    how = "needs you, " + how
+                lines.append(f"{pad}      {c(elbow, 'dim')} "
+                             + c(b.split("/")[-1].ljust(14), "dim")
+                             + c(how, "dim"))
+    return lines
+
+
 def next_action(conn, goals):
     """End on the one thing to do next, not on a legend."""
     needs = [t for g in goals for t in g["tasks"] if t["state"] == "waiting"]
     unapproved = [g for g in goals if g["state"] == "waiting"]
     if not needs and unapproved:
-        g = unapproved[0]
-        return [c("Next", "bold") + "  read it, then let it run",
-                "      " + c(f"substrate approve {g['id']}", "amber")]
+        # "Read it, reshape it" told a first-time reader to do something
+        # without saying how. There are exactly three answers to a plan, so
+        # name all three and let the reader pick.
+        g = unapproved[0]["id"]
+        return [c("Next", "bold") + "  read the plan, then answer it",
+                "      " + c(f"substrate approve {g}", "amber")
+                + c("                    let agents start", "dim"),
+                "      " + c(f'substrate changes {g} "what to change"', "amber")
+                + c("   have it planned again", "dim"),
+                "      " + c(f"substrate reject {g}", "dim")
+                + c("                     throw it away", "dim")]
     if needs:
         t = needs[0]["id"].split("/")[-1]
         word = "task needs" if len(needs) == 1 else "tasks need"
@@ -452,7 +558,11 @@ def cmd_tree(conn, a):
             kids_of.setdefault(n["parent"], []).append(n)
     lines, payload = [], []
     for g in goals:
-        lines += render_goal(g, kids_of, blockers, open_blockers) + [""]
+        nodes = {n["id"]: n for n in t["nodes"]}
+        draw = render_goal if a.brief else render_goal_full
+        lines += (draw(g, kids_of, blockers, open_blockers)
+                  if a.brief else
+                  draw(g, kids_of, blockers, open_blockers, nodes)) + [""]
         payload.append(dict(g, tasks=[n for n in t["nodes"]
                                       if n["parent"] and n["id"].startswith(g["id"] + "/")]))
     if not a.json:
@@ -646,6 +756,8 @@ def main():
     s = sub.add_parser("remove", help="delete a node; a goal takes its tasks with it")
     s.add_argument("node")
     s = sub.add_parser("tree"); s.add_argument("goal", nargs="?")
+    s.add_argument("--brief", action="store_true",
+                   help="one line per task, no criteria text")
     sub.add_parser("frontier")
     sub.add_parser("path")
     s = sub.add_parser("show"); s.add_argument("node")
@@ -665,7 +777,7 @@ def main():
 
     a = p.parse_args()
     if a.cmd is None:
-        a.cmd, a.goal = "tree", None
+        a.cmd, a.goal, a.brief = "tree", None, False
     conn = store.db()
     dispatch = {
         "decompose": cmd_decompose, "approve": cmd_approve, "run": cmd_run,

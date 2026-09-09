@@ -1,0 +1,12 @@
+{
+  "name": "substrate",
+  "description": "Supervise a swarm of agents against one goal. Keeps goals, tasks and their exit criteria in a durable record, so a session reads what is true instead of reconstructing it from the transcript. A task cannot be done while a criterion is open, and a criterion cannot be met without evidence. Use to find what is runnable, to record what you did as evidence, and to leave the next session a true picture.",
+  "version": "0.1.0",
+  "author": {
+    "name": "ladanjohari"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/ladanjohari/substrate",
+  "keywords": ["agents", "goals", "planning", "exit-criteria", "evidence", "approval", "supervision"],
+  "skills": "./skills/"
+}

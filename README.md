@@ -154,6 +154,19 @@ It exists because `substrate` on its own once shipped broken: the change that
 broke it was tested by running the commands the change was about, which is not
 the same as running the commands that still have to work.
 
+## As a Claude Code plugin
+
+The skill below ships as a plugin, so working against the substrate is one
+install rather than a copied file:
+
+```
+claude plugin marketplace add ladanjohari/substrate
+claude plugin install substrate@substrate
+```
+
+It adds one skill and nothing else: no agents, no hooks, no MCP server. It
+costs about 80 tokens in every session and loads the rest only when it fires.
+
 ## The Claude skill
 
 `skills/substrate/SKILL.md` teaches a Claude Code session to attach to the

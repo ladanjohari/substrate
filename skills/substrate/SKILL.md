@@ -1,6 +1,6 @@
 ---
 name: substrate
-description: Work against the substrate — the durable record of a goal, its tasks, and their exit criteria. Use at the start of any session that continues multi-week work, to find what is runnable, to record what you did as evidence against a criterion, and to leave the next session a true picture instead of a transcript.
+description: Work against the substrate, the durable record of a goal, its tasks, and their exit criteria. Use at the start of any session that continues multi-week work, to find what is runnable, to record what you did as evidence against a criterion, and to leave the next session a true picture instead of a transcript.
 ---
 
 A session is short. The work is not. This skill attaches a session to the
@@ -17,7 +17,7 @@ what is now true.
 criterion is a single fact a stranger could confirm by looking. Meeting one
 requires evidence: the file, the command output, the URL, the person who
 approved. The store refuses `done` while any criterion is open, and refuses to
-meet a criterion with no evidence. Do not work around this — it is the product.
+meet a criterion with no evidence. Do not work around this. It is the product.
 
 ## Commands
 
@@ -35,6 +35,14 @@ Run from the substrate repo. `./bin/substrate` (add `--json` for parsing).
 | `substrate add-criterion <node> "..."` | Add a condition that was missing |
 | `substrate state <node> <state> -n "..."` | Move a node: idle, working, waiting, error, done |
 | `substrate log [n]` | What has happened, most recent last |
+
+A proposed plan has exactly three answers, and only a person gives them:
+
+| Command | What it does |
+|---|---|
+| `substrate approve <goal>` | Releases the plan. Nothing runs before this |
+| `substrate changes <goal> "..."` | Asks for the plan to be thought again, with your note |
+| `substrate reject <goal> -w "..."` | Throws the plan away. The log keeps it |
 
 Set `SUBSTRATE_ACTOR` so the log records who you are, e.g. `claude-session-3`.
 
@@ -72,10 +80,10 @@ Set `SUBSTRATE_ACTOR` so the log records who you are, e.g. `claude-session-3`.
 
 ## Where it lives
 
-- `store/substrate.db` — the record: nodes, edges, criteria, events
-- `store/substrate_store.py` — the service on port 8040 and the frontier rule
-- `store/substrate_cli.py` — these commands
-- `DATA-MODEL.md` — the whole model in plain language
+- `store/substrate.db`, the record: nodes, edges, criteria, events
+- `store/substrate_store.py`, the service on port 8040 and the frontier rule
+- `store/substrate_cli.py`, these commands
+- `DATA-MODEL.md`, the whole model in plain language
 
 ## Related but different
 
