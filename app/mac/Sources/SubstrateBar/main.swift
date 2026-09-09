@@ -144,6 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pill: NSHostingView<PillView>!
     private var outsideClick: Any?
     private var previewWindow: NSWindow?
+    private var treeWindow: NSWindow?
+    private let treeModel = TreeModel()
     private var sizeObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -190,6 +192,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A text field cannot be drawn by ImageRenderer, so the only honest
         // picture of one is a screenshot of the thing actually running, and a
         // popover closes the moment anything else takes focus.
+        // `--preview --tree` opens the window straight away, so both layouts
+        // can be looked at without hunting for the menu bar item.
+        if args.contains("--tree") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.openTree()
+            }
+        }
+
         if args.contains("--preview") {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 368, height: 260),
                              styleMask: [.titled, .closable], backing: .buffered,
@@ -216,15 +226,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openTree() {
-        // Until the window exists, the browser pages are the full tree. They
-        // are served by a second little server, so start that too rather than
-        // opening an address nothing is listening on.
-        storeProcess.startPagesIfNeeded()
-        let url = URL(string: "http://localhost:8004/prototypes/live-tree/live-tree.html")!
-        // Give it a moment to bind the port, or the browser lands on an error.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            NSWorkspace.shared.open(url)
+        // The full tree is a window of this app now, not a browser page on a
+        // second little server. One window, reused: opening it again brings
+        // back the one you had, with the place you were in still selected.
+        if treeWindow == nil {
+            treeModel.start()
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 560),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                             backing: .buffered, defer: false)
+            w.title = "Substrate"
+            w.isReleasedWhenClosed = false
+            var forced: TreeLayout?
+            if let i = args.firstIndex(of: "--layout"), i + 1 < args.count {
+                forced = TreeLayout(rawValue: args[i + 1])
+            }
+            w.contentView = NSHostingView(
+                rootView: TreeWindowView(model: treeModel, forced: forced))
+            // `--select` drills straight in, so a capture can show the columns
+            // opened up. It calls the same function a click calls.
+            if let i = args.firstIndex(of: "--select"), i + 1 < args.count {
+                let ids = args[i + 1].split(separator: ",").map(String.init)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                    for (depth, id) in ids.enumerated() {
+                        self?.treeModel.select(id, atDepth: depth)
+                    }
+                }
+            }
+            w.center()
+            treeWindow = w
         }
+        NSApp.activate(ignoringOtherApps: true)
+        treeWindow?.makeKeyAndOrderFront(nil)
         close()
     }
 
