@@ -184,6 +184,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLayoutConstraint.activate([
                 pill.centerXAnchor.constraint(equalTo: button.centerXAnchor),
                 pill.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                // Without this the hosting view's own height grows the button,
+                // and everything positioned against the button goes with it.
+                pill.heightAnchor.constraint(
+                    equalToConstant: NSStatusBar.system.thickness),
             ])
             button.target = self
             button.action = #selector(toggle)
@@ -191,10 +195,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popover.behavior = .transient
         popover.delegate = self
-        popover.contentViewController = NSHostingController(
+        let panel = NSHostingController(
             rootView: PanelView(store: store,
                                 onOpenTree: { [weak self] in self?.openTree() },
                                 onQuit: { NSApp.terminate(nil) }))
+        // Tell the popover how big the panel wants to be.
+        //
+        // Without this the popover opens at some default size, then the
+        // SwiftUI content settles to its real height and the window shrinks
+        // from the top, leaving the panel hanging about 150 points below the
+        // menu bar. That is the "opens very low" she reported. Activating the
+        // app first fixed where it sat horizontally, not this, and I wrongly
+        // called it fixed then.
+        panel.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = panel
 
         // The status item is told how wide to be every time the pill changes.
         sizeObserver = store.$panel
@@ -216,6 +230,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // popover closes the moment anything else takes focus.
         // `--preview --tree` opens the window straight away, so both layouts
         // can be looked at without hunting for the menu bar item.
+        // `--demo` opens the panel straight away and leaves it open, for
+        // recording. See applicationDidResignActive.
+        if args.contains("--demo") {
+            // Activate first, then show. A popover opened while the app is not
+            // active is placed as though it belonged to whatever is in front,
+            // and lands well below the menu bar.
+            NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                NSApp.activate(ignoringOtherApps: true)
+                self?.show()
+            }
+        }
+
         if args.contains("--tree") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 self?.openTree()
@@ -292,7 +319,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Without this the panel is placed as though it belonged to whatever
         // app is in front, and lands well below the menu bar.
         NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
+        // Anchor to the menu bar, not to the button's bounds.
+        //
+        // The pill is a hosting view inside the button, and its own height was
+        // stretching the button's bounds well past the 24 points a menu bar
+        // item occupies. Handing those bounds to the popover put the panel
+        // about 150 points too low, hanging in the middle of the screen. I
+        // said this was fixed before; activating the app first fixed where it
+        // was placed horizontally, not this.
+        if args.contains("--why-low") {
+            let lines = """
+            button.bounds  \(button.bounds)
+            button.frame   \(button.frame)
+            window.frame   \(String(describing: button.window?.frame))
+            statusItem.len \(statusItem.length)
+            thickness      \(NSStatusBar.system.thickness)
+            screen         \(String(describing: NSScreen.main?.frame))
+            visibleFrame   \(String(describing: NSScreen.main?.visibleFrame))
+            """
+            try? lines.write(toFile: "/tmp/why.txt", atomically: true, encoding: .utf8)
+        }
+        let bar = NSRect(x: 0, y: 0,
+                         width: button.bounds.width,
+                         height: NSStatusBar.system.thickness)
+        popover.show(relativeTo: bar, of: button, preferredEdge: .maxY)
         popover.contentViewController?.view.window?.makeKey()
         outsideClick = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
@@ -301,6 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func close() {
+        if args.contains("--demo") { return }
         if let m = outsideClick { NSEvent.removeMonitor(m); outsideClick = nil }
         popover.performClose(nil)
     }
@@ -308,6 +359,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidResignActive(_ notification: Notification) {
         // A detached panel is a window of its own and must not be dismissed
         // just because you clicked another app.
+        //
+        // `--demo` also keeps it open: a screen recording is driven from
+        // outside the app, and a panel that closes the moment something else
+        // takes focus cannot be filmed. Nothing else about it changes.
+        if args.contains("--demo") { return }
         if popover.isShown && !popover.isDetached { close() }
     }
 }
