@@ -11,6 +11,42 @@ swift build
 .build/debug/SubstrateBar
 ```
 
+That gives you a bare executable, which runs but has no icon and cannot open
+at login. For the real thing:
+
+```
+cd app/mac
+./make-app.sh
+```
+
+That builds `Substrate.app`: the same binary in the bundle macOS expects, with
+an icon and a marker pointing back at this repo so it can still find the store.
+It is a menu bar app, so it has no Dock icon by design; the icon shows in
+Finder, in Spotlight and in the login items list.
+
+It is not signed or notarised. That is the App Store piece and it is not in
+this window, so the first open asks whether you meant to run it.
+
+## Opening at login
+
+The panel offers this only when you are running the bundled app, because macOS
+will not register a bare executable and a switch that always fails is worse
+than no switch. From a terminal:
+
+```
+./Substrate.app/Contents/MacOS/Substrate --login status
+./Substrate.app/Contents/MacOS/Substrate --login on
+./Substrate.app/Contents/MacOS/Substrate --login off
+```
+
+## The icon
+
+`make-icon.py` draws it: a row of dots where one is amber. That is already the
+mark in the menu bar, and an icon that was a picture of something else would be
+a second identity to keep in step. Motion means state, colour means exception,
+so the icon shows the one moment that matters. Rerun it only to change the
+drawing; `Substrate.icns` is committed so nobody needs Pillow to build the app.
+
 That is all of it. The app polls `http://127.0.0.1:8040/panel` once a second,
 and if nothing answers there it starts the store itself and stops it again when
 you quit. A menu bar app that makes you open a Terminal and run a Python server

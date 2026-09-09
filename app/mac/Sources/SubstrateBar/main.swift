@@ -109,6 +109,28 @@ if let i = args.firstIndex(of: "--render-panel"), i + 1 < args.count {
     exit(0)
 }
 
+/// `--login on|off|status` checks that opening at login actually works, from
+/// a terminal, without hunting for the switch in the panel.
+if let i = args.firstIndex(of: "--login") {
+    let want = i + 1 < args.count ? args[i + 1] : "status"
+    MainActor.assumeIsolated {
+        guard LoginItem.available else {
+            print("not a bundled app, so macOS has nothing to register.")
+            print("build it first:  ./make-app.sh")
+            exit(1)
+        }
+        if want == "status" {
+            print(LoginItem.on ? "opens at login" : "does not open at login")
+        } else if let problem = LoginItem.set(want == "on") {
+            print("macOS refused: \(problem)")
+            exit(1)
+        } else {
+            print(LoginItem.on ? "opens at login" : "does not open at login")
+        }
+    }
+    exit(0)
+}
+
 /// `--print` polls the store once and prints what it sees, so the connection
 /// can be checked without the interface.
 if args.contains("--print") {

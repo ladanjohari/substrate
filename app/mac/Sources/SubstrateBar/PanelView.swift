@@ -31,6 +31,7 @@ struct PanelView: View {
     @State private var answerFor: String?
     @State private var answerText = ""
     @FocusState private var answerField: Bool
+    @State private var atLogin = LoginItem.on
 
     private var p: Panel { store.panel }
     private var rows: Int { p.needs_you.count * 3 + p.running.count }
@@ -495,6 +496,16 @@ struct PanelView: View {
                 }
             }
             action("Open the full tree", tint: Color.secondary, run: onOpenTree)
+            // Only offered when it can actually work. Run from swift build
+            // there is no bundle for macOS to register, and a switch that
+            // always fails is worse than no switch.
+            if LoginItem.available {
+                action(atLogin ? "Opens at login" : "Open at login",
+                       tint: atLogin ? Color.accentColor : Color.secondary) {
+                    if let problem = LoginItem.set(!atLogin) { lastError = problem }
+                    else { atLogin = LoginItem.on; lastError = nil }
+                }
+            }
             Spacer()
             action("Quit", tint: Color.secondary, run: onQuit)
         }

@@ -456,6 +456,7 @@ def render_goal_full(g, kids_of, blockers, open_blockers, nodes):
         # own checks, which is the thing the old one line could not show.
         waits = open_blockers.get(t["id"], [])
         if waits:
+            bw = max(len(x.split("/")[-1]) for x in waits)
             lines.append(f"{pad}    {c('waits for', 'dim')}")
             for i, b in enumerate(waits):
                 bn = nodes.get(b, {})
@@ -468,9 +469,12 @@ def render_goal_full(g, kids_of, blockers, open_blockers, nodes):
                     how = "an agent is on it, " + how
                 elif bstate == "waiting":
                     how = "needs you, " + how
+                # A name longer than the column ran straight into its count:
+                # "research-and-outline0 of 4 checks met". Pad to the widest
+                # name actually present, and always leave a gap.
+                nm = b.split("/")[-1]
                 lines.append(f"{pad}      {c(elbow, 'dim')} "
-                             + c(b.split("/")[-1].ljust(14), "dim")
-                             + c(how, "dim"))
+                             + c(nm.ljust(bw), "dim") + "  " + c(how, "dim"))
     return lines
 
 

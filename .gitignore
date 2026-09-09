@@ -5,3 +5,6 @@ __pycache__/
 store/runner.beat
 store/outputs/
 .DS_Store
+app/mac/.build/
+app/mac/Substrate.app/
+app/mac/Substrate.iconset/

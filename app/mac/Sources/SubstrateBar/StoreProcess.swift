@@ -12,7 +12,17 @@ final class StoreProcess {
     private var signals: [DispatchSourceSignal] = []
 
     /// Walks up from the running binary to the repo, looking for the store.
+    ///
+    /// Inside an app bundle that walk ends at the bundle, so the build leaves
+    /// a marker naming where the repo is and this reads that first.
     static func find() -> URL? {
+        if let marker = Bundle.main.url(forResource: "repo-path", withExtension: nil),
+           let text = try? String(contentsOf: marker, encoding: .utf8) {
+            let repo = URL(fileURLWithPath:
+                text.trimmingCharacters(in: .whitespacesAndNewlines))
+            let store = repo.appendingPathComponent("store/substrate_store.py")
+            if FileManager.default.fileExists(atPath: store.path) { return store }
+        }
         var dir = URL(fileURLWithPath: CommandLine.arguments[0])
             .resolvingSymlinksInPath().deletingLastPathComponent()
         for _ in 0..<8 {
