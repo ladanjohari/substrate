@@ -18,24 +18,42 @@ public struct Substrate {
 
     /// Where the record lives. `SUBSTRATE_DB` moves it, which is how one
     /// project keeps its own separate from anybody else's.
-    public static func defaultPath() -> String {
+    ///
+    /// This used to walk up from `CommandLine.arguments[0]`, which is only a
+    /// path when you type one. Run through PATH it is the bare command name,
+    /// so the walk started in whatever directory you happened to be standing
+    /// in, found nothing, and quietly made a new empty record there. Somebody
+    /// in that position sees an empty tree and concludes their work is gone.
+    ///
+    /// So: walk up from the executable itself, and if there is no record to be
+    /// found, say so and name where it looked. Never invent one.
+    public static func defaultPath() throws -> String {
         if let p = ProcessInfo.processInfo.environment["SUBSTRATE_DB"], !p.isEmpty {
             return p
         }
-        // Alongside the store, the same as the Python looks for it, so both
-        // implementations read one file rather than two.
-        var dir = URL(fileURLWithPath: CommandLine.arguments[0])
-            .resolvingSymlinksInPath().deletingLastPathComponent()
+        let binary = Bundle.main.executableURL
+            ?? URL(fileURLWithPath: CommandLine.arguments[0])
+        var dir = binary.resolvingSymlinksInPath().deletingLastPathComponent()
+        var looked: [String] = []
         for _ in 0..<8 {
             let candidate = dir.appendingPathComponent("store/substrate.db")
             if FileManager.default.fileExists(atPath: candidate.path) { return candidate.path }
-            dir = dir.deletingLastPathComponent()
+            looked.append(candidate.path)
+            // Stop at the root. Foundation turns "/" into "/.." rather than
+            // standing still, so walking past it lists paths nobody has.
+            if dir.path == "/" { break }
+            dir = dir.deletingLastPathComponent().standardizedFileURL
         }
-        return FileManager.default.currentDirectoryPath + "/store/substrate.db"
+        throw DB.Failure.refused("""
+            no record found, and I will not make one where you happen to be standing.
+            Point at it:  SUBSTRATE_DB=/path/to/substrate.db
+            Looked in:
+            \(looked.prefix(4).map { "  " + $0 }.joined(separator: "\n"))
+            """)
     }
 
     public init(path: String? = nil) throws {
-        db = try DB(path: path ?? Substrate.defaultPath())
+        db = try DB(path: path ?? (try Substrate.defaultPath()))
         try db.script(Substrate.schema)
         // The same migrations the Python applies, in the same order, so a
         // database made by either one opens in the other.
@@ -177,7 +195,13 @@ public struct Substrate {
                 try db.run("UPDATE nodes SET owner=NULL WHERE id=?", [s(node)])
             }
         }
-        return try self.node(node)!
+        // Not a force unwrap: another process can flag this row removed
+        // between the commit and this read, and a library should say so
+        // rather than trap.
+        guard let after = try self.node(node) else {
+            throw DB.Failure.refused("\(node) was removed while it was being moved to \(state)")
+        }
+        return after
     }
 
     public struct CriterionResult {

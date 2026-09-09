@@ -42,8 +42,15 @@ struct PanelView: View {
             Divider().opacity(0.5)
 
             if store.offline {
-                message("The store is not running",
-                        "Start it with: python3 store/substrate_store.py serve 8040")
+                // If the store cannot even be found, saying "start it with"
+                // and naming a path that no longer exists is worse than
+                // saying nothing.
+                if let problem = StoreProcess.locationProblem() {
+                    message("Cannot find the store", problem)
+                } else {
+                    message("The store is not running",
+                            "Start it with: python3 store/substrate_store.py serve 8040")
+                }
             } else {
                 // A wait, and a failure, are cards at the top of whatever else
                 // is going on. They used to take the whole panel, so one

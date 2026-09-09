@@ -23,14 +23,37 @@ final class StoreProcess {
             let store = repo.appendingPathComponent("store/substrate_store.py")
             if FileManager.default.fileExists(atPath: store.path) { return store }
         }
-        var dir = URL(fileURLWithPath: CommandLine.arguments[0])
+        var dir = (Bundle.main.executableURL
+                   ?? URL(fileURLWithPath: CommandLine.arguments[0]))
             .resolvingSymlinksInPath().deletingLastPathComponent()
+        var looked: [String] = []
         for _ in 0..<8 {
             let candidate = dir.appendingPathComponent("store/substrate_store.py")
             if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
-            dir = dir.deletingLastPathComponent()
+            looked.append(candidate.path)
+            if dir.path == "/" { break }
+            dir = dir.deletingLastPathComponent().standardizedFileURL
         }
+        lastLookedIn = looked
         return nil
+    }
+
+    /// Where `find` looked and came up empty, so the panel can say something
+    /// better than "the store is not running". Moving the repo after building
+    /// the app puts you here, and the old message sent you to a directory
+    /// that no longer exists.
+    nonisolated(unsafe) static var lastLookedIn: [String] = []
+
+    /// nil when the store can be found. Otherwise, what to say about it.
+    static func locationProblem() -> String? {
+        if find() != nil { return nil }
+        let marker = Bundle.main.url(forResource: "repo-path", withExtension: nil)
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) }?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let marker {
+            return "This app was built against \(marker), and there is no store there now."
+        }
+        return "Looked in: " + lastLookedIn.prefix(2).joined(separator: ", ")
     }
 
     func startIfNeeded(port: Int = 8040) {

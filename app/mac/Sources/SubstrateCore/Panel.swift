@@ -58,9 +58,24 @@ public extension Substrate {
         })
         let blockedBy = t.openBlockers()
 
-        func slim(_ n: Node) throws -> PanelState.Item {
+        // Which goal each task belongs to, worked out once from the tree that
+        // is already in memory. This used to call rootGoal(of:) per task,
+        // which is a database query per level of depth, several hundred of
+        // them on a real store, once a second while the panel is open.
+        let parentOf = Dictionary(uniqueKeysWithValues:
+            t.nodes.map { ($0.id, $0.parent ?? "") })
+        func goalOf(_ id: String) -> String {
+            var current = id
+            for _ in 0..<32 {
+                guard let p = parentOf[current], !p.isEmpty else { return current }
+                current = p
+            }
+            return current
+        }
+
+        func slim(_ n: Node) -> PanelState.Item {
             PanelState.Item(
-                id: n.id, title: n.title, goal: try rootGoal(of: n.id),
+                id: n.id, title: n.title, goal: goalOf(n.id),
                 state: n.state, owner: n.owner,
                 met: n.criteriaMet, total: n.criteriaTotal,
                 depth: n.id.filter { $0 == "/" }.count - 1)
@@ -71,7 +86,7 @@ public extension Substrate {
         out.goals = goals.map { (id: $0.id, title: $0.title, state: $0.state) }
 
         for n in tasks where n.state == "waiting" {
-            var item = try slim(n)
+            var item = slim(n)
             // Ids as well as text: an app that can only show the checks is a
             // display. One that can close them is a tool.
             let open = n.criteria.filter { $0.state != "met" }
@@ -81,7 +96,7 @@ public extension Substrate {
         }
 
         for n in tasks where n.state == "working" {
-            var item = try slim(n)
+            var item = slim(n)
             item.elapsed = try elapsed(on: n.id)
             out.running.append(item)
         }
@@ -94,12 +109,11 @@ public extension Substrate {
         // come with it, because approving without seeing what you are
         // approving is exactly the thing this gate exists to prevent.
         for g in goals where g.state == "waiting" {
-            var kids: [Node] = []
-            for n in tasks where try rootGoal(of: n.id) == g.id { kids.append(n) }
+            let kids = tasks.filter { goalOf($0.id) == g.id }
             let ordered = t.inRunOrder(kids, blockedBy: blockedBy)
             var items: [PanelState.Item] = []
             for n in ordered {
-                var item = try slim(n)
+                var item = slim(n)
                 item.after = (blockedBy[n.id] ?? []).map {
                     $0.split(separator: "/").last.map(String.init) ?? $0
                 }

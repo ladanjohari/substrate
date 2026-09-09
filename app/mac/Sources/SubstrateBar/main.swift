@@ -344,6 +344,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          height: NSStatusBar.system.thickness)
         popover.show(relativeTo: bar, of: button, preferredEdge: .maxY)
         popover.contentViewController?.view.window?.makeKey()
+        // Nothing closes the panel in demo mode, so nothing needs watching for
+        // it. Installing one anyway leaked a monitor on every open, because
+        // close() is what removes it and close() does nothing there.
+        guard !args.contains("--demo") else { return }
+        if let m = outsideClick { NSEvent.removeMonitor(m) }
         outsideClick = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                 Task { @MainActor in self?.close() }
@@ -351,8 +356,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func close() {
-        if args.contains("--demo") { return }
+        // The monitor goes whatever mode we are in. Only the dismissal is
+        // skipped for demo mode.
         if let m = outsideClick { NSEvent.removeMonitor(m); outsideClick = nil }
+        if args.contains("--demo") { return }
         popover.performClose(nil)
     }
 
