@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""
+Run the Python and the Swift against one database and fail if they differ.
+
+This is what makes moving to Swift a port rather than a rewrite. Each check
+asks both implementations the same question and compares the answer. A
+difference is printed, not summarised, so it can be read and fixed.
+
+    ./bin/substrate-compare
+
+Needs the Swift side built once:  cd app/mac && swift build
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+PY = ROOT / "bin" / "substrate"
+SWIFT = ROOT / "app" / "mac" / ".build" / "debug" / "substrate-swift"
+
+
+def run(binary, args, env):
+    p = subprocess.run([str(binary)] + args, capture_output=True, text=True, env=env)
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def normalise(text):
+    """Timestamps and the machine's user name differ by construction."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+    def strip(x):
+        if isinstance(x, dict):
+            # Timestamps and the machine's user name differ by construction.
+            # Keys starting with "_" are the Python renderer's own scratch
+            # fields, not part of what the record means.
+            return {k: strip(v) for k, v in x.items()
+                    if not k.startswith("_")
+                    and k not in ("ts", "checked_at", "checked_by", "actor", "seq")}
+        if isinstance(x, list):
+            return [strip(v) for v in x]
+        return x
+    return json.dumps(strip(data), indent=2, sort_keys=True)
+
+
+def main():
+    if not SWIFT.exists():
+        print("the Swift side is not built yet:")
+        print("    cd app/mac && swift build")
+        return 1
+
+    tmp = tempfile.mkdtemp(prefix="substrate-compare-")
+    db = str(Path(tmp) / "compare.db")
+    env = {**os.environ, "SUBSTRATE_DB": db, "NO_COLOR": "1",
+           "SUBSTRATE_ACTOR": "compare"}
+
+    # A plan with depth, a blocking edge, and criteria in both states, so the
+    # comparison covers more than an empty file.
+    setup = [
+        ["add", "trip", "Plan a trip", "-c", "Flights are booked"],
+        ["add", "trip/flights", "Book flights", "-c", "Both legs", "-c", "Under 600"],
+        ["add", "trip/hotel", "Book a hotel", "-c", "Free cancellation", "--after", "flights"],
+        ["add", "trip/flights/seats", "Choose seats", "-c", "Two together"],
+        ["meet", "2", "-e", "booked on the 14th"],
+    ]
+    for args in setup:
+        code, out, err = run(PY, args, env)
+        if code != 0:
+            print(f"setup failed: substrate {' '.join(args)}\n{err or out}")
+            return 1
+
+    # Each pair is what to ask, and whether both must refuse it.
+    questions = [
+        (["--json", "tree"], "same"),
+        (["--json", "show", "flights"], "same"),
+        (["--json", "criteria", "flights"], "same"),
+        (["--json", "log"], "same"),
+        (["state", "trip", "done"], "both refuse"),
+        (["state", "flights", "done"], "both refuse"),
+        (["meet", "3"], "both refuse"),
+        (["meet", "999", "-e", "x"], "both refuse"),
+        (["state", "flights", "finished"], "both refuse"),
+    ]
+
+    bad = 0
+    for args, expect in questions:
+        pc, po, pe = run(PY, args, env)
+        sc, so, se = run(SWIFT, args, env)
+        name = "substrate " + " ".join(args)
+
+        if expect == "both refuse":
+            if pc == 0 or sc == 0:
+                print(f"DIFFERENT  {name}")
+                print(f"  python exit {pc}, swift exit {sc}; both should have refused")
+                bad += 1
+                continue
+            # The words matter: a person reads them to decide what to do next.
+            pk, sk = (pe or po).lower(), (se or so).lower()
+            gist = [w for w in ("still open", "requires evidence", "unknown criterion",
+                                "no exit criteria", "unknown state") if w in pk]
+            if gist and not all(w in sk for w in gist):
+                print(f"DIFFERENT  {name}")
+                print(f"  python said: {pe or po}")
+                print(f"  swift said:  {se or so}")
+                bad += 1
+            else:
+                print(f"same       {name}  (both refuse)")
+            continue
+
+        a, b = normalise(po), normalise(so)
+        if a != b:
+            print(f"DIFFERENT  {name}")
+            for line in _diff(a, b):
+                print("   " + line)
+            bad += 1
+        else:
+            print(f"same       {name}")
+
+    shutil.rmtree(tmp, ignore_errors=True)
+    print()
+    if bad:
+        print(f"{bad} of {len(questions)} answers differ")
+        return 1
+    print(f"all {len(questions)} answers match")
+    return 0
+
+
+def _diff(a, b):
+    import difflib
+    return list(difflib.unified_diff(a.splitlines(), b.splitlines(),
+                                     "python", "swift", lineterm="", n=1))[:40]
+
+
+if __name__ == "__main__":
+    sys.exit(main())
