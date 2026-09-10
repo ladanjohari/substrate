@@ -286,12 +286,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                              backing: .buffered, defer: false)
             w.title = "Substrate"
             w.isReleasedWhenClosed = false
-            var forced: TreeLayout?
-            if let i = args.firstIndex(of: "--layout"), i + 1 < args.count {
-                forced = TreeLayout(rawValue: args[i + 1])
+            // `--layout` chooses, rather than overriding what the picker
+            // shows. Overriding drew one layout with the other one selected in
+            // the control above it, which is the interface telling you
+            // something untrue about itself.
+            if let i = args.firstIndex(of: "--layout"), i + 1 < args.count,
+               TreeLayout(rawValue: args[i + 1]) != nil {
+                UserDefaults.standard.set(args[i + 1], forKey: "treeLayout")
             }
-            w.contentView = NSHostingView(
-                rootView: TreeWindowView(model: treeModel, forced: forced))
+            w.contentView = NSHostingView(rootView: TreeWindowView(model: treeModel))
             // `--select` drills straight in, so a capture can show the columns
             // opened up. It calls the same function a click calls.
             if let i = args.firstIndex(of: "--select"), i + 1 < args.count {

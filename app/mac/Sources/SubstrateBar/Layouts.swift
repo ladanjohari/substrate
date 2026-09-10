@@ -50,11 +50,9 @@ enum TreeLayout: String, CaseIterable, Identifiable {
 /// mean choosing a layout again every time.
 struct TreeWindowView: View {
     @ObservedObject var model: TreeModel
-    /// Set by `--layout` so a capture can show either one without clicking.
-    var forced: TreeLayout?
     @AppStorage("treeLayout") private var stored = TreeLayout.miller.rawValue
 
-    private var layout: TreeLayout { forced ?? TreeLayout(rawValue: stored) ?? .miller }
+    private var layout: TreeLayout { TreeLayout(rawValue: stored) ?? .miller }
 
     var body: some View {
         VStack(spacing: 0) {
