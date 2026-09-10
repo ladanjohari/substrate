@@ -526,7 +526,20 @@ struct PanelView: View {
         .padding(.horizontal, Self.contentPad).padding(.top, 7).padding(.bottom, 2)
     }
 
-    private var settings: some View {
+    @ViewBuilder private var settings: some View {
+        // ImageRenderer cannot draw a Menu and paints a yellow placeholder in
+        // its place, which is what turned up in a portfolio still. For a still,
+        // draw the glyph the menu shows; the running app keeps the real menu.
+        if Motion.still {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        } else {
+            realSettingsMenu
+        }
+    }
+
+    private var realSettingsMenu: some View {
         Menu {
             Section("Record") {
                 Text(Record.name)

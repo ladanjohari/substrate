@@ -99,10 +99,23 @@ if let i = args.firstIndex(of: "--render-pill"), i + 1 < args.count {
 if let i = args.firstIndex(of: "--render-panel"), i + 1 < args.count {
     MainActor.assumeIsolated {
         let store = Store()
-        store.loadDemo(args.contains("--empty") ? Panel()
-                       : args.contains("--thinking") ? demoThinking(failed: false)
-                       : args.contains("--failed") ? demoThinking(failed: true)
-                       : args.contains("--plan") ? demoPlan() : demoPanel())
+        // `--live [port]` renders what a running store actually says, not the
+        // demo data. The same view code, the same data the app would show, and
+        // nothing from the screen behind it bleeding through the panel.
+        if let j = args.firstIndex(of: "--live") {
+            let port = (j + 1 < args.count ? Int(args[j + 1]) : nil) ?? 8040
+            guard let data = try? Data(contentsOf: URL(string: "http://127.0.0.1:\(port)/panel")!),
+                  let live = try? JSONDecoder().decode(Panel.self, from: data) else {
+                print("no store answering on port \(port)")
+                exit(1)
+            }
+            store.loadDemo(live)
+        } else {
+            store.loadDemo(args.contains("--empty") ? Panel()
+                           : args.contains("--thinking") ? demoThinking(failed: false)
+                           : args.contains("--failed") ? demoThinking(failed: true)
+                           : args.contains("--plan") ? demoPlan() : demoPanel())
+        }
         render(PanelView(store: store, onOpenTree: {}, onQuit: {}),
                to: args[i + 1], scale: 2, dark: args.contains("--dark"))
     }
