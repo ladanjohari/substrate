@@ -31,6 +31,7 @@ HERE = Path(__file__).parent
 OUT = HERE / "outputs"
 sys.path.insert(0, str(HERE))
 import substrate_store as store  # noqa: E402
+import claude_cli  # noqa: E402
 
 PROMPT = """You are a worker agent inside a goal-tracking system. Execute this task and output ONLY the deliverable, no preamble.
 
@@ -125,9 +126,15 @@ def main():
                    f"{args.note}\n\nPrevious version:\n---\n"
                    f"{previous.read_text()[:8000] if previous.exists() else '(none)'}\n---")
 
+    exe = claude_cli.binary()
+    if not exe:
+        # The app starts the store without Homebrew on PATH, so say which
+        # problem this is rather than dying on a missing file.
+        raise SystemExit(claude_cli.MISSING)
+
     t0 = time.time()
     proc = subprocess.run(
-        ["claude", "-p", prompt, "--model", args.model],
+        [exe, "-p", prompt, "--model", args.model],
         capture_output=True, text=True, timeout=300,
     )
     dt = time.time() - t0
@@ -176,8 +183,12 @@ def check_criteria(node, deliverable, args):
     if not crits:
         return 0
     listing = "\n".join(f"{c['id']}: {c['text']}" for c in crits)
+    exe = claude_cli.binary()
+    if not exe:
+        print("no claude command, so nothing can be checked")
+        return 0
     proc = subprocess.run(
-        ["claude", "-p", CHECK_PROMPT.format(criteria=listing, deliverable=deliverable[:12000]),
+        [exe, "-p", CHECK_PROMPT.format(criteria=listing, deliverable=deliverable[:12000]),
          "--model", args.model],
         capture_output=True, text=True, timeout=180)
     m = re.search(r"\[.*\]", proc.stdout, re.S)

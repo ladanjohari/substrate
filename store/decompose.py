@@ -22,6 +22,12 @@ import re
 import subprocess
 import sys
 import urllib.request
+import os
+
+# The app's store runs with a PATH that has no Homebrew on it, so where the
+# claude command lives is its own question, answered in one place.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import claude_cli  # noqa: E402
 
 STORE = "http://localhost:8040"
 
@@ -109,16 +115,18 @@ def api(path, payload=None):
 
 def ask(prompt):
     """One call to the model. Planning and replanning fail the same way."""
+    exe = claude_cli.binary()
+    if not exe:
+        # Without this the caller gets a Python traceback, which tells a
+        # person nothing about what to do next.
+        sys.exit(claude_cli.MISSING)
     try:
         out = subprocess.run(
-            ["claude", "-p", prompt, "--model", "sonnet"],
+            [exe, "-p", prompt, "--model", "sonnet"],
             capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError:
-        # Without this the caller gets a Python traceback, which tells a
-        # person nothing about what to do next.
-        sys.exit("the claude command is not installed, so there is nothing to "
-                 "turn the sentence into a plan")
+        sys.exit(claude_cli.MISSING)
     if out.returncode != 0 or "Failed to authenticate" in out.stdout:
         # The CLI prints a login failure on stdout with a zero exit code, so
         # check both, and say what to do rather than showing an empty error.
