@@ -735,9 +735,11 @@ def panel(conn):
     running = [slim(n, {"elapsed": _elapsed(conn, n["id"])})
                for n in tasks if n["state"] == "working"]
 
-    ready = [n["id"] for n in tasks
-             if n["state"] == "idle" and n["id"] not in has_open_kids
-             and not blocked_by.get(n["id"])]
+    # The same rule the agents use, rather than a second one that looks
+    # similar. They disagreed: this listed a task whose goal had been removed
+    # years of sessions ago, so the panel offered work no agent would ever
+    # take.
+    ready = frontier(conn)
 
     # A goal nobody has approved is a plan waiting to be read. The panel needs
     # the tasks themselves, not just a count, because approving without seeing
@@ -818,7 +820,8 @@ def panel(conn):
         "thinking": thinking,
         # What an agent could take right now. The app offers to start them
         # rather than telling you to open a terminal and type.
-        "ready": [slim(nodes[i]) for i in ready],
+        "ready": [slim(nodes[i], {"goal_title": nodes.get(root_goal(conn, i), {})
+                                  .get("title", "")}) for i in ready],
         "closable": closable,
         "runner": runner_state(),
         "counts": counts,
@@ -1192,9 +1195,12 @@ class Handler(BaseHTTPRequestHandler):
                                                 payload.get("evidence")))
             elif self.path == "/run":
                 import subprocess as sp
-                sp.Popen(["python3", str(Path(__file__).parent / "worker_ai.py"),
-                          "--task", payload["node"]],
-                         stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+                sp.Popen([sys.executable,
+                          str(Path(__file__).parent / "worker_ai.py"),
+                          "--task", payload["node"], "--actor", "agent 1"],
+                         stdout=sp.DEVNULL, stderr=sp.DEVNULL,
+                         env={**os.environ, "SUBSTRATE_DB": str(DB_PATH)})
+                return self._send({"ok": True, "node": payload["node"]})
             elif self.path == "/task/redo":
                 return self._send(redo(db(), payload["node"],
                                        payload.get("note", ""), actor))

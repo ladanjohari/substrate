@@ -48,6 +48,9 @@ struct Panel: Decodable, Equatable {
         var elapsed: String?
         /// Whether an agent has written something for this one.
         var has_output: Bool?
+        /// Which goal this belongs to, in words. A list of task names from
+        /// seven goals, with nothing saying which is which, is a pile.
+        var goal_title: String?
         var after: [String]?
     }
 
@@ -198,6 +201,12 @@ final class Store: ObservableObject {
     /// work, next to accepting it and leaving it alone.
     func redo(task: String, note: String, then: @escaping (String?) -> Void) {
         post("/task/redo", ["node": task, "note": note], then)
+    }
+
+    /// Put one agent on one task. "Start the agents" takes everything ready,
+    /// which is wrong when the record holds several goals and you mean this one.
+    func run(task: String, then: @escaping (String?) -> Void) {
+        post("/run", ["node": task], then)
     }
 
     /// Start the agents on whatever is ready. Which task they take is the

@@ -149,6 +149,41 @@ final class TreeModel: ObservableObject {
         }
     }
 
+    /// Delete a node, and its tasks if it is a goal. Soft: the rows stay
+    /// flagged so the log still makes sense, which is why this says remove
+    /// rather than delete.
+    ///
+    /// The window is where every goal is visible at once, so it is where
+    /// getting rid of one belongs. It used to be a terminal command, and a
+    /// record you cannot tidy fills up with things you have stopped caring
+    /// about until you cannot see the one you are working on.
+    func remove(_ id: String, then: @escaping (String?) -> Void = { _ in }) {
+        var r = URLRequest(url: url.deletingLastPathComponent()
+            .appendingPathComponent("node/remove"))
+        r.httpMethod = "POST"
+        r.timeoutInterval = 5
+        r.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["node": id, "actor": "you"])
+        URLSession.shared.dataTask(with: r) { [weak self] data, response, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if let error { return then(error.localizedDescription) }
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if code >= 400 {
+                    let why = (try? JSONSerialization.jsonObject(with: data ?? Data()))
+                        .flatMap { ($0 as? [String: Any])?["error"] as? String }
+                    return then(why ?? "the store refused that")
+                }
+                // Stop pointing at something that is no longer there.
+                if let i = self.path.firstIndex(of: id) {
+                    self.path = Array(self.path.prefix(i))
+                }
+                self.poll()
+                then(nil)
+            }
+        }.resume()
+    }
+
     /// The node the detail pane should show: the deepest one you selected.
     var selected: TreeNode? { path.last.flatMap { byId[$0] } }
 

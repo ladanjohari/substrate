@@ -159,6 +159,10 @@ struct NodeRow: View {
 struct DetailPane: View {
     @ObservedObject var model: TreeModel
     let node: TreeNode
+    @State private var confirming = false
+    @State private var problem: String?
+
+    private var isGoal: Bool { !node.id.contains("/") }
 
     var body: some View {
         ScrollView {
@@ -188,9 +192,37 @@ struct DetailPane: View {
                     .padding(.top, 18).padding(.bottom, 6)
 
                 ForEach(node.criteria) { c in check(c) }
+
+                if let problem {
+                    Text(problem).font(.system(size: 11.5)).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 14)
+                }
+
+                Divider().padding(.top, 20).padding(.bottom, 10)
+                Button(isGoal ? "Remove this goal" : "Remove this task") {
+                    confirming = true
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Dot.error.color)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
+        }
+        .confirmationDialog(isGoal ? "Remove this goal and its tasks?"
+                                   : "Remove this task?",
+                            isPresented: $confirming, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) {
+                model.remove(node.id) { problem = $0 }
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            // What removal actually does, because "delete" in a record that
+            // keeps an event log does not mean the thing never happened.
+            Text(isGoal
+                 ? "\(node.title) and everything under it stop showing anywhere. The log keeps what already happened."
+                 : "It stops showing anywhere. The log keeps what already happened.")
         }
     }
 

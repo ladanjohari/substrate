@@ -90,13 +90,16 @@ struct PanelView: View {
         } else if let waiting = planToAnswer {
             // Only a long plan scrolls: a ScrollView wrapping content that fits
             // adds nothing and cannot be captured for review.
-            if waiting.tasks.count > 10 {
+            if waiting.tasks.count > 10 && !Motion.still {
                 ScrollView { plan(waiting) }.frame(maxHeight: 440)
             } else {
                 plan(waiting)
             }
-        } else if rows > 8 {
-                // Only a long list scrolls. A short one lays itself out
+        } else if rows > 8 && !Motion.still {
+                // Only a long list scrolls. ImageRenderer draws a ScrollView as
+                // an empty box, so a still of a busy panel came out blank, which
+                // is the one case a still is most needed. Stills lay it all out.
+                // A short one lays itself out
                 // directly, which is the common case and the one that can be
                 // captured for review.
             ScrollView { content }.frame(maxHeight: 420)
@@ -169,8 +172,13 @@ struct PanelView: View {
             }
 
             if !p.ready.isEmpty {
-                group(p.runner.on ? "Waiting for a free agent" : "Ready for an agent")
-                ForEach(p.ready) { item in row(item.title, right: "", dot: .idle) }
+                // Under the goal each belongs to. Ten task names from seven
+                // goals, listed flat, is a pile you cannot act on: you cannot
+                // see whether the one you just added is in there.
+                ForEach(readyByGoal, id: \.0) { title, items in
+                    group(title)
+                    ForEach(items) { item in readyRow(item) }
+                }
             }
 
             if !p.ready.isEmpty || p.runner.on {
@@ -564,6 +572,33 @@ struct PanelView: View {
 
     private func close(_ item: Panel.Item) {
         store.markDone(node: item.id) { problem in lastError = problem }
+    }
+
+    /// Ready work, gathered under the goal it belongs to, in the order the
+    /// store sent it so the two never disagree about what comes first.
+    private var readyByGoal: [(String, [Panel.Item])] {
+        var order: [String] = []
+        var byGoal: [String: [Panel.Item]] = [:]
+        for item in p.ready {
+            let key = item.goal_title ?? item.goal
+            if byGoal[key] == nil { order.append(key) }
+            byGoal[key, default: []].append(item)
+        }
+        return order.map { ($0, byGoal[$0] ?? []) }
+    }
+
+    /// One ready task, and the offer to put an agent on just this one.
+    private func readyRow(_ item: Panel.Item) -> some View {
+        HStack(spacing: 8) {
+            DotView(dot: .idle)
+            Text(item.title).font(.system(size: 13)).lineLimit(1)
+            Spacer(minLength: 8)
+            action("Run this", tint: Color.accentColor) {
+                store.run(task: item.id) { problem in lastError = problem }
+            }
+        }
+        .padding(.horizontal, 6).frame(height: 28)
+        .padding(.horizontal, Self.sidePad)
     }
 
     /// Starting and stopping the agents, and what they last said.
