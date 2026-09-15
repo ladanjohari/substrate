@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The popover. It answers one question: does anything need me?
@@ -17,6 +18,10 @@ struct PanelView: View {
 
     @State private var expanded: Int?
     @State private var evidence: [Int: String] = [:]
+    /// The task being sent back, and what to tell the agent about it.
+    @State private var sendingBack: String?
+    @State private var backNote = ""
+    @FocusState private var backField: Bool
     @State private var lastError: String?
     @State private var composing = false
     @State private var sentence = ""
@@ -35,7 +40,8 @@ struct PanelView: View {
     @State private var atLogin = LoginItem.on
 
     private var p: Panel { store.panel }
-    private var rows: Int { p.needs_you.count * 3 + p.running.count }
+    private var rows: Int { p.needs_you.count * 3 + p.closable.count * 3
+        + p.running.count + p.ready.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -149,12 +155,26 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(p.needs_you) { item in question(item) }
 
+            // A goal with every task done still has its own checks. It is the
+            // last step of the whole thing, so it belongs here and not in a
+            // terminal.
+            ForEach(p.closable) { goal in question(goal, isGoal: true) }
+
             if !p.running.isEmpty {
                 group("Running now")
                 ForEach(p.running) { item in
                     row(item.title, right: [item.owner, item.elapsed]
                         .compactMap { $0 }.joined(separator: " · "), dot: .working)
                 }
+            }
+
+            if !p.ready.isEmpty {
+                group(p.runner.on ? "Waiting for a free agent" : "Ready for an agent")
+                ForEach(p.ready) { item in row(item.title, right: "", dot: .idle) }
+            }
+
+            if !p.ready.isEmpty || p.runner.on {
+                agents
             }
 
             if quietCount > 0 {
@@ -190,10 +210,25 @@ struct PanelView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
-                TextField("What do you want done?", text: $sentence)
-                    .textFieldStyle(.roundedBorder).font(.system(size: 12))
-                    .focused($goalField)
-                    .onSubmit { startGoal() }
+                // ImageRenderer cannot draw a TextField and paints a yellow
+                // placeholder over it, the same way it does a Menu. A still of
+                // the panel is how this app gets reviewed, so draw the field
+                // at rest instead of a yellow bar.
+                if Motion.still {
+                    Text("What do you want done?")
+                        .font(.system(size: 12)).foregroundStyle(.tertiary)
+                        .padding(.horizontal, 7).padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 5)
+                            .fill(Color(nsColor: .textBackgroundColor)))
+                        .overlay(RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 0.5))
+                } else {
+                    TextField("What do you want done?", text: $sentence)
+                        .textFieldStyle(.roundedBorder).font(.system(size: 12))
+                        .focused($goalField)
+                        .onSubmit { startGoal() }
+                }
                 Button("Plan it") { startGoal() }
                     .controlSize(.small)
                     .disabled(sentence.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -393,7 +428,7 @@ struct PanelView: View {
 
     /// A task that stopped and needs a person, with the checks it could not
     /// prove. Each one can be closed here, with the evidence that closes it.
-    private func question(_ item: Panel.Item) -> some View {
+    private func question(_ item: Panel.Item, isGoal: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 DotView(dot: .needs)
@@ -403,6 +438,14 @@ struct PanelView: View {
                 Text("\(item.met) of \(item.total)")
                     .font(.system(size: 11)).monospacedDigit()
                     .foregroundStyle(Dot.needs.color.opacity(0.9))
+            }
+
+            if isGoal {
+                // Why a goal is suddenly asking: its tasks are finished, and
+                // what is left is the goal's own check.
+                Text("Every task is done. This is what the goal itself asks.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             let texts = item.open_criteria ?? []
@@ -416,8 +459,37 @@ struct PanelView: View {
                 Text(e).font(.system(size: 11)).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if !isGoal && item.has_output == true {
+                HStack(spacing: 10) {
+                    // The checks ask whether the work is good. Answering that
+                    // without being able to read the work is guessing.
+                    Button("Read what the agent wrote") { readDeliverable(item.id) }
+                        .buttonStyle(.plain).font(.system(size: 11.5))
+                        .foregroundStyle(Color.accentColor)
+                    // Not good enough is the ordinary answer, and it used to
+                    // have nowhere to go.
+                    Button("Ask for changes") {
+                        sendingBack = item.id; backNote = ""; backField = true
+                    }
+                    .buttonStyle(.plain).font(.system(size: 11.5))
+                    .foregroundStyle(Color.accentColor)
+                }
+                if sendingBack == item.id {
+                    HStack(spacing: 6) {
+                        TextField("what should change", text: $backNote)
+                            .textFieldStyle(.roundedBorder).font(.system(size: 12))
+                            .focused($backField)
+                            .onSubmit { sendBack(item.id) }
+                        Button("Cancel") { sendingBack = nil }.controlSize(.small)
+                            .keyboardShortcut(.cancelAction)
+                        Button("Send") { sendBack(item.id) }
+                            .controlSize(.small).keyboardShortcut(.defaultAction)
+                            .disabled(backNote.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
             if (item.open_criteria ?? []).isEmpty {
-                Button("Close this task") { close(item) }
+                Button(isGoal ? "Close this goal" : "Close this task") { close(item) }
                     .font(.system(size: 12)).controlSize(.small)
             }
         }
@@ -472,8 +544,53 @@ struct PanelView: View {
         }
     }
 
+    /// The agent's deliverable, in a browser. The store already serves it, and
+    /// a markdown file is not something to retype into a 368 point panel.
+    private func readDeliverable(_ node: String) {
+        let escaped = node.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed) ?? node
+        guard let url = URL(string: "http://127.0.0.1:8040/output/\(escaped)?raw=1") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func sendBack(_ node: String) {
+        let note = backNote
+        store.redo(task: node, note: note) { problem in
+            if let problem { lastError = problem } else {
+                sendingBack = nil; backNote = ""; lastError = nil
+            }
+        }
+    }
+
     private func close(_ item: Panel.Item) {
         store.markDone(node: item.id) { problem in lastError = problem }
+    }
+
+    /// Starting and stopping the agents, and what they last said.
+    ///
+    /// The runner was a thing you typed in a terminal. That made the panel a
+    /// place you watched rather than a place you worked, which is the wrong
+    /// half of the job for the thing in the menu bar.
+    private var agents: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if p.runner.on {
+                Text(p.runner.note.isEmpty ? "Agents are working" : p.runner.note)
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 6)
+                if p.runner.ours {
+                    action("Stop the agents", tint: Color.secondary) {
+                        store.stopAgents { problem in lastError = problem }
+                    }
+                }
+            } else {
+                action("Start the agents", tint: Color.accentColor) {
+                    store.startAgents { problem in lastError = problem }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, Self.contentPad).padding(.top, 7)
     }
 
     private func group(_ title: String) -> some View {

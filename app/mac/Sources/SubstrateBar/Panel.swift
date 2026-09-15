@@ -12,8 +12,21 @@ struct Panel: Decodable, Equatable {
     var running: [Item] = []
     var proposed: [Proposed] = []
     var thinking: [Thinking] = []
+    /// What an agent could take right now, and the goals whose tasks are all
+    /// done and so have only their own checks left.
+    var ready: [Item] = []
+    var closable: [Item] = []
+    var runner: Runner = Runner()
     var counts: Counts = Counts()
     var pill: Pill = Pill()
+
+    /// Whether agents are working. `ours` means this store started them, which
+    /// is the only case where this app can honestly offer to stop them.
+    struct Runner: Decodable, Equatable {
+        var on = false
+        var ours = false
+        var note = ""
+    }
 
     struct Goal: Decodable, Equatable, Identifiable {
         let id: String
@@ -33,6 +46,8 @@ struct Panel: Decodable, Equatable {
         var open_criteria: [String]?
         var open_ids: [Int]?
         var elapsed: String?
+        /// Whether an agent has written something for this one.
+        var has_output: Bool?
         var after: [String]?
     }
 
@@ -177,6 +192,24 @@ final class Store: ObservableObject {
     func markDone(node: String, then: @escaping (String?) -> Void) {
         post("/event", ["node": node, "to": "done", "actor": "you",
                         "note": "closed from the menu bar"], then)
+    }
+
+    /// Send an agent's work back with a note. The third answer to a piece of
+    /// work, next to accepting it and leaving it alone.
+    func redo(task: String, note: String, then: @escaping (String?) -> Void) {
+        post("/task/redo", ["node": task, "note": note], then)
+    }
+
+    /// Start the agents on whatever is ready. Which task they take is the
+    /// frontier's decision; this only says go. Before this, a panel that could
+    /// show you work sitting ready still needed a terminal to start it.
+    func startAgents(then: @escaping (String?) -> Void) {
+        post("/runner/start", [:], then)
+    }
+
+    /// Stop them. A task already in flight finishes; nothing new is taken.
+    func stopAgents(then: @escaping (String?) -> Void) {
+        post("/runner/stop", [:], then)
     }
 
     private func post(_ path: String, _ body: [String: Any],

@@ -35,6 +35,7 @@ cannot be met without evidence. That pair is what makes 'done' testable rather
 than asserted.
 """
 
+import atexit
 import json
 import os
 import sqlite3
@@ -722,8 +723,14 @@ def panel(conn):
         open_ = [c for c in (n["criteria"] or []) if c["state"] != "met"]
         # Ids as well as text: an app that can only show the checks is a
         # display. One that can close them is a tool.
+        # Whether there is something written to read. The owner is cleared when
+        # an agent finishes, so asking "did an agent touch this" by looking at
+        # the owner hid the writing exactly when it was ready to be read.
+        wrote = (Path(__file__).parent / "outputs"
+                 / (n["id"].replace("/", "__") + ".md")).exists()
         needs_you.append(slim(n, {"open_criteria": [c["text"] for c in open_],
-                                  "open_ids": [c["id"] for c in open_]}))
+                                  "open_ids": [c["id"] for c in open_],
+                                  "has_output": wrote}))
 
     running = [slim(n, {"elapsed": _elapsed(conn, n["id"])})
                for n in tasks if n["state"] == "working"]
@@ -789,11 +796,31 @@ def panel(conn):
              + [("error", n["id"]) for n in tasks if n["state"] == "error"]
              + [("done", n["id"]) for n in tasks if n["state"] == "done"])
     dots = [k for k, _ in order[:4]] or (["hollow"] if not tasks else ["idle"])
+    # A goal whose tasks are all done is not done: it has its own checks, and
+    # somebody has to answer them. Without this the last step of every goal
+    # could only be taken from a terminal, which is not a thing you can ask of
+    # the person the app is for.
+    closable = []
+    for g in goals:
+        if g["state"] in ("waiting", "done"):
+            continue
+        kids = [n for n in tasks if root_goal(conn, n["id"]) == g["id"]]
+        if not kids or any(k["state"] != "done" for k in kids):
+            continue
+        open_ = [c for c in (g["criteria"] or []) if c["state"] != "met"]
+        closable.append(slim(g, {"open_criteria": [c["text"] for c in open_],
+                                 "open_ids": [c["id"] for c in open_]}))
+
     return {
         "as_of": now(),
         "goals": [{"id": g["id"], "title": g["title"], "state": g["state"]} for g in goals],
         "needs_you": needs_you, "running": running, "proposed": proposed,
         "thinking": thinking,
+        # What an agent could take right now. The app offers to start them
+        # rather than telling you to open a terminal and type.
+        "ready": [slim(nodes[i]) for i in ready],
+        "closable": closable,
+        "runner": runner_state(),
         "counts": counts,
         "pill": {"dots": dots, "overflow": max(0, len(order) - 4)},
     }
@@ -834,6 +861,8 @@ def call(path, payload=None):
         return {"ok": claim(conn, payload["node"], actor)}
     if path == "/approve":
         return approve(conn, payload["goal"], actor, payload.get("note"))
+    if path == "/task/redo":
+        return redo(conn, payload["node"], payload.get("note", ""), actor)
     if path == "/criterion/set":
         return set_criterion(conn, int(payload["criterion"]), payload["to"],
                              actor, payload.get("evidence"))
@@ -864,7 +893,78 @@ THINKING = {}
 # during iteration", the store answers 500, and the app reports itself offline
 # when nothing is wrong.
 THINKING_LOCK = threading.Lock()
-RUNNER_BEAT = Path(__file__).parent / "runner.beat"
+# Next to the record, not next to the code: one heartbeat per record.
+# Shared, it told an app looking at one record that agents were working
+# when they were working on a different one.
+RUNNER_BEAT = DB_PATH.parent / (DB_PATH.name + ".beat")
+
+# The agents, when the app started them. The runner used to be something you
+# typed in a terminal, which meant the app could show you work needing a
+# person but never start any. It is a child of the store now, so quitting
+# takes the agents with it rather than leaving them running invisibly.
+RUNNER = None
+
+
+def redo(conn, node, note, actor="you"):
+    """Send an agent's work back with a note, and let it try again.
+
+    The worker could always take a note and rewrite its last attempt, but
+    nothing offered it: the panel showed work you could accept or leave sitting
+    there. Saying what is wrong with it is the ordinary third answer, and
+    without it a task the agent half did is a dead end.
+
+    The task goes back to working here rather than to idle, because idle is
+    what the runner watches, and the runner would take it without the note.
+    """
+    row = conn.execute("SELECT state FROM nodes WHERE id=? AND removed=0",
+                       (node,)).fetchone()
+    if not row:
+        raise ValueError(f"unknown node: {node}")
+    if not (note or "").strip():
+        raise ValueError("say what should change; a redo with no note is a rerun")
+    append_event(conn, node, "working", actor, f"sent back: {note.strip()[:200]}")
+    conn.execute("UPDATE nodes SET owner=? WHERE id=?", ("agent 1 (again)", node))
+    conn.commit()
+    import subprocess as sp
+    env = {**os.environ, "SUBSTRATE_DB": str(DB_PATH)}
+    sp.Popen([sys.executable, str(Path(__file__).parent / "worker_ai.py"),
+              "--task", node, "--claimed", "--actor", "agent 1 (again)",
+              "--note", note.strip()],
+             stdout=sp.DEVNULL, stderr=sp.DEVNULL, env=env)
+    return {"ok": True, "node": node}
+
+
+def start_runner():
+    """Start the agents, unless they are already going."""
+    global RUNNER
+    if RUNNER is not None and RUNNER.poll() is None:
+        return {"ok": True, "already": True}
+    import subprocess as sp
+    env = {**os.environ, "SUBSTRATE_DB": str(DB_PATH)}
+    RUNNER = sp.Popen([sys.executable, str(Path(__file__).parent / "runner.py")],
+                      stdout=sp.DEVNULL, stderr=sp.DEVNULL, env=env)
+    return {"ok": True, "already": False}
+
+
+def stop_runner():
+    """Stop them. A task already in flight finishes; nothing new is taken."""
+    global RUNNER
+    if RUNNER is not None and RUNNER.poll() is None:
+        RUNNER.terminate()
+        try:
+            RUNNER.wait(timeout=5)
+        except Exception:
+            RUNNER.kill()
+    RUNNER = None
+    # The heartbeat is what "agents are working" is read from, so leaving the
+    # last one behind would keep the app claiming they are, for half a minute
+    # after you stopped them.
+    RUNNER_BEAT.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+# Agents outliving the window that started them is the failure this avoids.
+atexit.register(stop_runner)
 
 
 def _thinking_snapshot():
@@ -966,13 +1066,17 @@ def runner_state():
     # If that timestamp is recent, work is actually being picked up; if it is
     # not, nothing is running no matter what any page claims.
     if not RUNNER_BEAT.exists():
-        return {"on": False, "note": "never started"}
+        return {"on": False, "ours": False, "note": "never started"}
     try:
         beat = json.loads(RUNNER_BEAT.read_text())
     except (ValueError, OSError):
-        return {"on": False, "note": "unreadable"}
+        return {"on": False, "ours": False, "note": "unreadable"}
     age = datetime.now(timezone.utc).timestamp() - beat.get("at", 0)
-    return {"on": age < 30, "seconds_ago": round(age),
+    # Started here, or started by somebody in a terminal? Only the first can be
+    # stopped from the app, and offering to stop what you cannot stop is worse
+    # than not offering.
+    ours = RUNNER is not None and RUNNER.poll() is None
+    return {"on": age < 30 or ours, "ours": ours, "seconds_ago": round(age),
             "note": beat.get("note", ""), "task": beat.get("task")}
 
 
@@ -985,6 +1089,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _text(self, body, code=200):
+        data = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _fail(self, exc):
         # One bad request must never take the store down with it.
@@ -1010,12 +1122,20 @@ class Handler(BaseHTTPRequestHandler):
         conn = db()
         if self.path.startswith("/output/"):
             import urllib.parse
-            nid = urllib.parse.unquote(self.path[len("/output/"):])
+            q = urllib.parse.urlparse(self.path)
+            nid = urllib.parse.unquote(q.path[len("/output/"):])
+            raw = urllib.parse.parse_qs(q.query).get("raw", [""])[0] == "1"
             f = Path(__file__).parent / "outputs" / (nid.replace("/", "__") + ".md")
-            if f.exists():
-                self._send({"node": nid, "output": f.read_text()})
-            else:
-                self._send({"error": "no output yet"}, 404)
+            if not f.exists():
+                if raw:
+                    return self._text("Nothing written for this one yet.", 404)
+                return self._send({"error": "no output yet"}, 404)
+            # A person opening this in a browser gets the writing. JSON with
+            # the newlines escaped is for programs, and reading it is how you
+            # decide whether a check is met.
+            if raw:
+                return self._text(f.read_text())
+            self._send({"node": nid, "output": f.read_text()})
             return
         if self.path.startswith("/criteria"):
             import urllib.parse
@@ -1075,6 +1195,13 @@ class Handler(BaseHTTPRequestHandler):
                 sp.Popen(["python3", str(Path(__file__).parent / "worker_ai.py"),
                           "--task", payload["node"]],
                          stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+            elif self.path == "/task/redo":
+                return self._send(redo(db(), payload["node"],
+                                       payload.get("note", ""), actor))
+            elif self.path == "/runner/start":
+                return self._send(start_runner())
+            elif self.path == "/runner/stop":
+                return self._send(stop_runner())
             elif self.path == "/goal/new":
                 return self._send(start_decompose(payload.get("sentence", "")))
             elif self.path == "/goal/reject":

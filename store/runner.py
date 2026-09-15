@@ -37,7 +37,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).parent
-BEAT = HERE / "runner.beat"
 IDLE_SLEEP = 6
 
 # Same test the AI worker uses: if the exit criterion names a person deciding,
@@ -49,6 +48,9 @@ HUMAN = re.compile(
 
 sys.path.insert(0, str(HERE))
 import substrate_store as store  # noqa: E402
+
+# One heartbeat per record, written where the record is.
+BEAT = store.RUNNER_BEAT
 
 
 def api(path):
@@ -99,7 +101,7 @@ def why_idle(tasks, tree, busy, lost=0):
         more = f" +{len(yours) - 3} more" if len(yours) > 3 else ""
         n = len(yours)
         return (f"nothing left for an agent. {n} task{'' if n == 1 else 's'} "
-                f"need you: {names}{more}")
+                f"{'needs' if n == 1 else 'need'} you: {names}{more}")
     waiting = [n for n in tree["nodes"] if not n.get("parent") and n["state"] == "waiting"]
     if waiting:
         return "no approved work. Waiting for your approval: " + ", ".join(

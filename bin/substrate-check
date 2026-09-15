@@ -50,6 +50,9 @@ CASES = [
     (["block", "hotel", "--after", "flights"], "ok"),
     (["unblock", "hotel", "--from", "flights"], "ok"),
     (["remove", "hotel"], "ok"),
+    # Sending work back names the task, so a name nobody has is refused rather
+    # than starting an agent on nothing. No AI call happens on this path.
+    (["redo", "not-a-task", "make", "it", "shorter"], "refuse"),
 ]
 
 SETUP = [

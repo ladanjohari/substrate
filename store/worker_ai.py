@@ -53,6 +53,10 @@ For each criterion below, decide whether the deliverable ALREADY satisfies it. M
 Criteria (id: text):
 {criteria}
 
+The deliverable is saved as a file at: {path}
+A criterion that asks whether a file exists at a known path is satisfied by
+that path, if the content below is the list or document it describes.
+
 Deliverable:
 ---
 {deliverable}
@@ -154,7 +158,7 @@ def main():
     # each criterion, one at a time, and can only mark one met by quoting the
     # evidence for it. Anything it cannot evidence stays unmet, and the task goes
     # to waiting for a human instead of quietly closing.
-    checked = check_criteria(task["id"], result, args)
+    checked = check_criteria(task["id"], result, args, path=str(outfile))
     still_open = [c for c in api(f"/criteria/{task['id']}") if c["state"] != "met"]
 
     if still_open:
@@ -177,18 +181,31 @@ def main():
     print(f"done in {dt:.0f}s -> {outfile}")
 
 
-def check_criteria(node, deliverable, args):
+# How much of the deliverable the checker is shown. It used to be 12,000
+# characters, which silently cut anything past roughly ten pages: a section
+# the writer had added sat below the cut, the checker could not see it, and it
+# reported the criterion unmet. A person then read the file, saw the section,
+# and had no idea why the check had failed.
+CHECK_LIMIT = 120_000
+
+
+def check_criteria(node, deliverable, args, path="(not saved)"):
     """Judge each criterion against the deliverable; mark only what can be evidenced."""
     crits = [c for c in api(f"/criteria/{node}") if c["state"] != "met"]
     if not crits:
         return 0
     listing = "\n".join(f"{c['id']}: {c['text']}" for c in crits)
+    shown = deliverable[:CHECK_LIMIT]
+    if len(deliverable) > CHECK_LIMIT:
+        shown += ("\n\n[The deliverable is longer than this. What follows the cut "
+                  "cannot be judged, so treat anything you cannot see as not met.]")
     exe = claude_cli.binary()
     if not exe:
         print("no claude command, so nothing can be checked")
         return 0
     proc = subprocess.run(
-        [exe, "-p", CHECK_PROMPT.format(criteria=listing, deliverable=deliverable[:12000]),
+        [exe, "-p", CHECK_PROMPT.format(criteria=listing, deliverable=shown,
+                                        path=path),
          "--model", args.model],
         capture_output=True, text=True, timeout=180)
     m = re.search(r"\[.*\]", proc.stdout, re.S)

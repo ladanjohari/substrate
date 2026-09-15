@@ -23,6 +23,7 @@ Every command takes --json for agents; the default output is for humans.
   substrate show <node>                one node in full
   substrate criteria <node>            its exit criteria and their evidence
   substrate add-criterion <node> TEXT  add a criterion
+  substrate redo <task> "..."          send an agent's work back with a note
   substrate meet <criterion-id> -e ""  mark one met, with evidence
   substrate fail <criterion-id> -e ""  mark one failed, with evidence
   substrate reopen <criterion-id>      take back one ticked off in error
@@ -718,6 +719,19 @@ def cmd_set_criterion(conn, a, to_state):
     out(f"#{a.criterion} on {res['node']} -> {to_state}{tail}", res, a.json)
 
 
+def cmd_redo(conn, a):
+    """Send an agent's work back with a note. The note is the whole point."""
+    node = resolve(conn, a.node)
+    note = " ".join(a.note)
+    try:
+        store.redo(conn, node, note, actor())
+    except ValueError as e:
+        sys.exit(f"refused: {e}")
+    out(f"{node} sent back to an agent with your note. It rewrites its last "
+        f"attempt; watch it with substrate tree.",
+        {"node": node, "note": note}, a.json)
+
+
 def cmd_state(conn, a):
     a.node = resolve(conn, a.node)
     try:
@@ -753,6 +767,9 @@ def main():
     s.add_argument("goal"); s.add_argument("-n", "--note")
     s = sub.add_parser("changes", help="ask for changes to a proposed plan")
     s.add_argument("goal"); s.add_argument("note", nargs="+",
+                                           help="what should change, in your words")
+    s = sub.add_parser("redo", help="send an agent's work back with a note")
+    s.add_argument("node"); s.add_argument("note", nargs="+",
                                            help="what should change, in your words")
     s = sub.add_parser("reject", help="throw a proposed plan away")
     s.add_argument("goal"); s.add_argument("-w", "--why", help="why, for the log")
@@ -799,7 +816,7 @@ def main():
     conn = store.db()
     dispatch = {
         "decompose": cmd_decompose, "approve": cmd_approve, "run": cmd_run,
-        "changes": cmd_changes, "reject": cmd_reject,
+        "changes": cmd_changes, "redo": cmd_redo, "reject": cmd_reject,
         "add": cmd_add, "edit": cmd_edit, "block": cmd_block, "unblock": cmd_unblock,
         "remove": cmd_remove,
         "tree": cmd_tree, "frontier": cmd_frontier, "path": cmd_path, "show": cmd_show,
