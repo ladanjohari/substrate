@@ -175,10 +175,18 @@ do {
             })
         } else {
             for r in shown {
-                print([r["ts"]?.string ?? "", r["actor"]?.string ?? "",
-                       r["node"]?.string ?? "",
-                       "\(r["from_state"]?.string ?? "") -> \(r["to_state"]?.string ?? "")",
-                       r["note"]?.string ?? ""].joined(separator: "  "))
+                // One piece at a time. Written as a single array literal with
+                // an interpolation inside it, the type checker gave up and the
+                // whole build failed on an expression that is small to read
+                // and enormous to infer.
+                let ts: String = r["ts"]?.string ?? ""
+                let who: String = r["actor"]?.string ?? ""
+                let node: String = r["node"]?.string ?? ""
+                let from: String = r["from_state"]?.string ?? ""
+                let to: String = r["to_state"]?.string ?? ""
+                let note: String = r["note"]?.string ?? ""
+                let parts: [String] = [ts, who, node, from + " -> " + to, note]
+                print(parts.joined(separator: "  "))
             }
         }
 

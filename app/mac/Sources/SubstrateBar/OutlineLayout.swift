@@ -14,7 +14,7 @@ struct OutlineLayout: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ScrollView {
+            Scroller {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(visible, id: \.node.id) { row in
                         HStack(spacing: 0) {

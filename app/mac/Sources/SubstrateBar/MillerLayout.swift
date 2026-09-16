@@ -14,7 +14,7 @@ struct MillerLayout: View {
 
     var body: some View {
         ScrollViewReader { scroller in
-            ScrollView(.horizontal, showsIndicators: true) {
+            Scroller(axes: .horizontal) {
                 HStack(spacing: 0) {
                     ForEach(Array(model.columns.enumerated()), id: \.offset) { depth, rows in
                         column(rows, depth: depth)
@@ -42,7 +42,7 @@ struct MillerLayout: View {
     }
 
     private func column(_ rows: [TreeNode], depth: Int) -> some View {
-        ScrollView {
+        Scroller {
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(rows) { n in
                     NodeRow(model: model, node: n,

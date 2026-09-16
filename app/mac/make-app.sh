@@ -19,6 +19,14 @@ ID="tools.substrate.menubar"
 VERSION="0.1.0"
 
 echo "Building..."
+# The command line tools updated in September 2026 without the SwiftUI macro
+# plugin, so building against them fails on every @State in the app, with an
+# error about a macro nobody has heard of. Xcode ships the plugin. Prefer it
+# when it is installed.
+if [ -z "$DEVELOPER_DIR" ] && [ -d /Applications/Xcode.app ]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+
 swift build -c release
 
 if [ ! -f Substrate.icns ]; then

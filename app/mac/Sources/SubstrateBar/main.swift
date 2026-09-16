@@ -122,6 +122,40 @@ if let i = args.firstIndex(of: "--render-panel"), i + 1 < args.count {
     exit(0)
 }
 
+/// `--render-window out.png [--live port] [--layout miller|outline] [--select a,b]`
+/// draws the window the same way, because the panel says what needs you and the
+/// window is the only place the shape of the work is visible.
+if let i = args.firstIndex(of: "--render-window"), i + 1 < args.count {
+    MainActor.assumeIsolated {
+        let model = TreeModel()
+        let j = args.firstIndex(of: "--live")
+        let port = (j.map { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil } ?? nil) ?? 8040
+        guard let data = try? Data(contentsOf: URL(string: "http://127.0.0.1:\(port)/tree")!),
+              let live = try? JSONDecoder().decode(Tree.self, from: data) else {
+            print("no store answering on port \(port)")
+            exit(1)
+        }
+        model.loadDemo(live)
+        // The picker is what the window reads on launch, so set it rather than
+        // drawing one layout with the other one selected.
+        if let k = args.firstIndex(of: "--layout"), k + 1 < args.count {
+            UserDefaults.standard.set(args[k + 1], forKey: "treeLayout")
+        }
+        // Drill in, so the capture shows the columns doing what they do.
+        if let k = args.firstIndex(of: "--select"), k + 1 < args.count {
+            for (depth, id) in args[k + 1].split(separator: ",").enumerated() {
+                model.select(String(id), atDepth: depth)
+            }
+        }
+        let size = args.firstIndex(of: "--size").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        let parts = (size ?? "1040x600").split(separator: "x").compactMap { Double($0) }
+        render(TreeWindowView(model: model)
+                .frame(width: parts.first ?? 1040, height: parts.last ?? 600),
+               to: args[i + 1], scale: 2, dark: args.contains("--dark"))
+    }
+    exit(0)
+}
+
 /// `--login on|off|status` checks that opening at login actually works, from
 /// a terminal, without hunting for the switch in the panel.
 if let i = args.firstIndex(of: "--login") {

@@ -1,5 +1,26 @@
 import SwiftUI
 
+/// A ScrollView, except in a still.
+///
+/// ImageRenderer draws a ScrollView as an empty box, so every capture of the
+/// window came out blank and the one surface that shows the structure could
+/// not be reviewed or put in front of anyone.
+struct Scroller<Content: View>: View {
+    var axes: Axis.Set = .vertical
+    var showsIndicators = true
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if Motion.still {
+            // Top, not centre. Without this the rows float in the middle of
+            // the window and a capture is mostly empty space.
+            content().frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            ScrollView(axes, showsIndicators: showsIndicators, content: content)
+        }
+    }
+}
+
 /// The window's layouts, and the seam they all sit behind.
 ///
 /// He asked for Miller columns, so that is the default. The point of this file
@@ -81,12 +102,33 @@ struct TreeWindowView: View {
 
     private var bar: some View {
         HStack(spacing: 10) {
-            Picker("", selection: $stored) {
-                ForEach(TreeLayout.allCases) { l in Text(l.name).tag(l.rawValue) }
+            // Third control ImageRenderer paints a yellow box over, after the
+            // Menu and the TextField. Draw what the picker looks like at rest,
+            // with the chosen layout filled in.
+            if Motion.still {
+                HStack(spacing: 0) {
+                    ForEach(TreeLayout.allCases) { l in
+                        Text(l.name)
+                            .font(.system(size: 12, weight: l == layout ? .semibold : .regular))
+                            .foregroundStyle(l == layout ? Color.primary : Color.secondary)
+                            .frame(width: 95, height: 20)
+                            .background(RoundedRectangle(cornerRadius: 5)
+                                .fill(l == layout ? Color(nsColor: .textBackgroundColor)
+                                                  : Color.clear))
+                    }
+                }
+                .padding(2)
+                .background(RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.secondary.opacity(0.14)))
+                .frame(width: 190)
+            } else {
+                Picker("", selection: $stored) {
+                    ForEach(TreeLayout.allCases) { l in Text(l.name).tag(l.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 190)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 190)
 
             Text(layout.note)
                 .font(.system(size: 11.5)).foregroundStyle(.secondary)
@@ -165,7 +207,7 @@ struct DetailPane: View {
     private var isGoal: Bool { !node.id.contains("/") }
 
     var body: some View {
-        ScrollView {
+        Scroller {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     DotView(dot: model.dot(node))
