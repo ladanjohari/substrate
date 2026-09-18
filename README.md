@@ -9,17 +9,31 @@ as a side effect of doing the work. Humans read that state at whatever altitude
 they need: one status dot, the full task tree, or the single question that
 needs a person.
 
-This repo is the data store, the command line in front of it, the Claude skill
-that lets an agent work against it, and the browser pages that show it live.
-The menu bar app that sits on top is described in [PROPOSAL.md](PROPOSAL.md).
+This repo is the macOS menu bar app, the data store underneath it, the command
+line in front of that, and the Claude skill that lets an agent work against the
+same record.
 
-## Install
+## Open the app
+
+macOS 14 or newer, with Xcode.
+
+```
+git clone https://github.com/ladanjohari/substrate.git
+cd substrate && open "Open Substrate.command"
+```
+
+A Terminal window opens, builds the app once, and a row of dots appears in your
+menu bar, top right. Click the dots for the panel, type a goal, and read the plan
+it proposes. Quit from the panel, or close that Terminal window, to stop it.
+
+Nothing is downloaded and nothing is signed: the app is built on your machine
+from the source in this repo, so Gatekeeper is not involved.
+
+## Or use it from the command line
 
 Python 3.10 or newer. No packages to install.
 
 ```
-git clone <this repo> substrate
-cd substrate
 ./bin/substrate
 ```
 

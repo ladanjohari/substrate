@@ -1,53 +1,47 @@
-# How to open the Substrate yourself
+# How to open Substrate
 
-## The whole project lives here
-the folder you cloned this into
+## The app
 
-To see it: open Finder, press Cmd+Shift+G, paste that path, hit Enter.
-Or: this folder is `substrate` inside your `projects` folder.
+Double-click **`Open Substrate.command`** in this folder, or run it from a
+terminal:
 
-## To open the live app (canvas, gates, negotiate)
-Double-click **`Open Substrate.command`** in this folder.
-- A Terminal window opens and starts three small things: the store (your goals),
-  the pages, and the runner (which picks up work you have approved).
-- It waits until each one really answers, then says `running` next to each.
-  If one says `DID NOT START`, it tells you which file holds the reason.
-- Your browser opens the canvas automatically.
-- Leave the Terminal window open while you use it.
-- To stop: close that Terminal window.
+```
+open "Open Substrate.command"
+```
 
-(First time only, macOS may warn about opening it. Right-click the file,
-choose Open, then Open again. After that, double-click works.)
+A Terminal window opens and builds the app, which takes a minute the first time
+and a second or two after that. Then a row of dots appears in your menu bar, top
+right. Click the dots for the panel.
 
-## The pages, once it's running
-Every page now has a bar across the top with links to the other three, so you
-do not have to remember any of these addresses.
+- **Type a goal** in the panel and press Plan it. One AI call, about half a
+  minute, and the plan comes back as tasks with the checks that close them.
+- **Nothing runs until you approve.** The three answers are approve, ask for
+  changes, and reject.
+- **Start the agents** from the panel when work is ready.
+- **Open the full tree** for the window: every goal, its tasks, what each one
+  waits on, and the checks with their evidence.
 
-- Canvas (the main one):  http://localhost:8004/prototypes/canvas/canvas.html
-- Live tree (watch only):  http://localhost:8004/prototypes/live-tree/live-tree.html
-- Negotiate (approve plans): http://localhost:8004/prototypes/negotiate/negotiate.html
-- Gates (answer questions):  http://localhost:8004/prototypes/gates/gates.html
+To stop it: quit from the panel, or close that Terminal window.
 
-The right-hand end of that bar tells you the truth about the engine: whether
-your goals are reachable, and whether the runner is actually working on
-something or sitting idle. If the store stops, every page says so and tells you
-how to start it again.
+You need macOS 14 or newer and Xcode. The command line tools alone are not
+enough at the moment: the September 2026 release ships without the SwiftUI macro
+plugin, and the build fails on it. The launcher uses Xcode when it is installed.
 
-## What's inside, in plain terms
-- `store/`      the database and its little service (the memory)
-- `prototypes/` the app pages you open
+## The record
 
-## To type a new goal in
-On the Canvas page, press **New goal**, write it in one sentence, press
-**Break it down**.
+Your goals live in one SQLite file, `store/substrate.db`. To keep more than one,
+point `SUBSTRATE_DB` at another file, or use **Open another record** in the
+panel's settings menu.
 
-It thinks for about half a minute, then the plan appears on the canvas. It
-arrives amber, meaning it is waiting for you. Go to the Negotiate page to
-reshape it and approve it. Nothing runs until you approve.
+## The command line
 
-Once you approve, the runner picks the plan up by itself, one task at a time.
-It will not touch a task whose exit criterion needs a person to decide: those
-are left for you, and it says so rather than guessing.
+The same record, without the app:
 
-(The Terminal still works if you prefer it:
-`python3 store/decompose.py "your goal in one sentence"`)
+```
+./bin/substrate            the tree
+./bin/substrate decompose  a sentence in, a plan out
+./bin/substrate approve <goal>
+./bin/substrate run        agents take the work
+```
+
+`./bin/substrate --help` lists every command.
