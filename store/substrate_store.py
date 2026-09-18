@@ -726,8 +726,7 @@ def panel(conn):
         # Whether there is something written to read. The owner is cleared when
         # an agent finishes, so asking "did an agent touch this" by looking at
         # the owner hid the writing exactly when it was ready to be read.
-        wrote = (Path(__file__).parent / "outputs"
-                 / (n["id"].replace("/", "__") + ".md")).exists()
+        wrote = (OUTPUTS / (n["id"].replace("/", "__") + ".md")).exists()
         needs_you.append(slim(n, {"open_criteria": [c["text"] for c in open_],
                                   "open_ids": [c["id"] for c in open_],
                                   "has_output": wrote}))
@@ -900,6 +899,10 @@ THINKING_LOCK = threading.Lock()
 # Shared, it told an app looking at one record that agents were working
 # when they were working on a different one.
 RUNNER_BEAT = DB_PATH.parent / (DB_PATH.name + ".beat")
+# Where an agent's writing lands. SUBSTRATE_OUTPUTS moves it, which is how the
+# Swift side and this one can be pointed at the same folder while a comparison
+# runs against two throwaway databases.
+OUTPUTS = Path(os.environ.get("SUBSTRATE_OUTPUTS") or Path(__file__).parent / "outputs")
 
 # The agents, when the app started them. The runner used to be something you
 # typed in a terminal, which meant the app could show you work needing a
@@ -1128,7 +1131,7 @@ class Handler(BaseHTTPRequestHandler):
             q = urllib.parse.urlparse(self.path)
             nid = urllib.parse.unquote(q.path[len("/output/"):])
             raw = urllib.parse.parse_qs(q.query).get("raw", [""])[0] == "1"
-            f = Path(__file__).parent / "outputs" / (nid.replace("/", "__") + ".md")
+            f = OUTPUTS / (nid.replace("/", "__") + ".md")
             if not f.exists():
                 if raw:
                     return self._text("Nothing written for this one yet.", 404)

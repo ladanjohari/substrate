@@ -66,9 +66,13 @@ def main():
         return 1
 
     tmp = tempfile.mkdtemp(prefix="substrate-compare-")
-    db = str(Path(tmp) / "compare.db")
-    env = {**os.environ, "SUBSTRATE_DB": db, "NO_COLOR": "1",
-           "SUBSTRATE_ACTOR": "compare"}
+    # Each side builds its own database from the same commands. That is what
+    # puts the write path under the comparison: if Swift's `add` writes a
+    # different row than the Python's, every question after it differs.
+    def side(name):
+        return {**os.environ, "SUBSTRATE_DB": str(Path(tmp) / f"{name}.db"),
+                "NO_COLOR": "1", "SUBSTRATE_ACTOR": "compare"}
+    env, env_swift = side("python"), side("swift")
 
     # A plan with depth, a blocking edge, and criteria in both states, so the
     # comparison covers more than an empty file.
@@ -88,12 +92,19 @@ def main():
         # stopped and needs a person.
         ["state", "hotel", "working", "-n", "claimed"],
         ["state", "seats", "waiting", "-n", "needs a decision"],
+        # The write path beyond creation: rewriting words, adding a check, and
+        # an edge added and taken away again.
+        ["edit", "hotel", "-t", "Book a hotel with a late check-in"],
+        ["add-criterion", "hotel", "Late check-in is confirmed in writing"],
+        ["block", "seats", "--after", "hotel"],
+        ["unblock", "seats", "--from", "hotel"],
     ]
     for args in setup:
-        code, out, err = run(PY, args, env)
-        if code != 0:
-            print(f"setup failed: substrate {' '.join(args)}\n{err or out}")
-            return 1
+        for binary, e, who in ((PY, env, "python"), (SWIFT, env_swift, "swift")):
+            code, out, err = run(binary, args, e)
+            if code != 0:
+                print(f"setup failed in {who}: substrate {' '.join(args)}\n{err or out}")
+                return 1
 
     # Each pair is what to ask, and whether both must refuse it.
     questions = [
@@ -111,13 +122,24 @@ def main():
         (["approve", "flights"], "both refuse"),     # a task, not a goal
         (["reject", "trip"], "both refuse"),         # only a proposed plan
         (["reject", "nosuch"], "both refuse"),
+        # Creation refuses the same four things on both sides.
+        (["add", "trip", "Another trip", "-c", "x"], "both refuse"),      # id taken
+        (["add", "nope/child", "Orphan", "-c", "x"], "both refuse"),      # no parent
+        (["add", "trip/loose", "No checks"], "both refuse"),              # no criterion
+        (["add", "two words", "Spaced", "-c", "x"], "both refuse"),       # not a slug
+        (["block", "flights", "--after", "flights"], "both refuse"),      # itself
+        (["block", "flights", "--after", "hotel"], "both refuse"),        # a loop
+        (["unblock", "flights", "--from", "hotel"], "both refuse"),       # no such edge
+        (["edit", "hotel"], "both refuse"),                               # nothing given
+        (["--json", "show", "hotel"], "same"),
+        (["--json", "criteria", "hotel"], "same"),
     ]
 
     bad = 0
     # The panel is the biggest query and the one the app lives on, so it is
     # compared even though only one side has it as a command.
     pc, po, _ = python_panel(env)
-    sc, so, se = run(SWIFT, ["--json", "panel"], env)
+    sc, so, se = run(SWIFT, ["--json", "panel"], env_swift)
     if pc != 0 or sc != 0:
         print(f"DIFFERENT  panel  (python exit {pc}, swift exit {sc})\n  {se}")
         bad_panel = 1
@@ -133,7 +155,7 @@ def main():
 
     for args, expect in questions:
         pc, po, pe = run(PY, args, env)
-        sc, so, se = run(SWIFT, args, env)
+        sc, so, se = run(SWIFT, args, env_swift)
         name = "substrate " + " ".join(args)
 
         if expect == "both refuse":
