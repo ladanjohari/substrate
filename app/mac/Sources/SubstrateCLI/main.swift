@@ -178,6 +178,79 @@ do {
         if wantsJSON { emit(["node": node, "changed": changed]) }
         else { print("\(node): " + changed.joined(separator: ", ") + " rewritten") }
 
+    case "path":
+        let cp = try store.criticalPath()
+        if wantsJSON {
+            // Keyed by goal, the same shape the Python prints. A goal with no
+            // tasks carries no head and no blocked flag, also the same.
+            var out: [String: Any] = [:]
+            for g in cp {
+                var d: [String: Any] = ["title": g.title, "cost": g.cost,
+                                        "next": g.next as Any? ?? NSNull()]
+                d["path"] = g.path.map { ["id": $0.id, "title": $0.title,
+                                          "state": $0.state,
+                                          "open_criteria": $0.openCriteria] }
+                if let head = g.head {
+                    d["head"] = head
+                    d["blocked"] = g.blocked
+                }
+                out[g.goal] = d
+            }
+            emit(out)
+        } else {
+            var printed = false
+            for g in cp where !g.path.isEmpty {
+                printed = true
+                print("\(g.title)   \(g.goal)")
+                print("  the longest chain left is \(g.cost) open criteria")
+                print("")
+                let w = g.path.map { $0.id.split(separator: "/").last?.count ?? 0 }.max() ?? 0
+                for step in g.path {
+                    let name = step.id.split(separator: "/").last.map(String.init) ?? step.id
+                    let pad = String(repeating: " ", count: max(0, w - name.count))
+                    print("  \(name)\(pad)  \(step.openCriteria) open")
+                }
+                print("")
+                if let next = g.next {
+                    print("Next  start here")
+                    print("      substrate show \(next.split(separator: "/").last.map(String.init) ?? next)")
+                } else if let head = g.head {
+                    let h = head.split(separator: "/").last.map(String.init) ?? head
+                    print("Next  nothing can start, \(h) is waiting on you")
+                    print("      substrate show \(h)")
+                }
+                print("")
+            }
+            if !printed { print("no chain to walk yet.  substrate tree   to see what is there") }
+        }
+
+    case "reopen":
+        // A criterion ticked off in error has to be takeable back, or the
+        // record is not truthful. The log keeps the mistake and the
+        // correction both: the trail of a mistake is data.
+        guard let which = args.first, let cid = Int(which) else {
+            fail("which criterion? substrate reopen <id>")
+        }
+        let reason = flag("--reason") ?? "reopened; the earlier evidence did not hold"
+        let res = try store.set(criterion: cid, to: "unmet", actor: actor, evidence: reason)
+        if wantsJSON {
+            emit(["criterion": res.criterion, "node": res.node, "state": res.state,
+                  "node_closable": res.nodeClosable])
+        } else {
+            print("#\(cid) on \(res.node) is open again. The old evidence stays in the log.")
+        }
+
+    case "redo":
+        guard let which = args.first else { fail("substrate redo <node> \"what should change\"") }
+        let node = try resolve(which)
+        let said = args.dropFirst().joined(separator: " ")
+        try store.redo(node: node, note: said, actor: actor)
+        if wantsJSON { emit(["node": node, "note": said]) }
+        else {
+            print("\(node) sent back to an agent with your note. It rewrites its "
+                  + "last attempt; watch it with substrate tree.")
+        }
+
     case "show", "criteria":
         guard let name = args.first else { fail("which node?") }
         let id = try resolve(name)

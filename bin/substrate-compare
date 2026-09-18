@@ -131,6 +131,13 @@ def main():
         (["block", "flights", "--after", "hotel"], "both refuse"),        # a loop
         (["unblock", "flights", "--from", "hotel"], "both refuse"),       # no such edge
         (["edit", "hotel"], "both refuse"),                               # nothing given
+        (["--json", "path"], "same"),
+        (["reopen", "2", "--reason", "the booking was cancelled"], "same"),
+        (["--json", "criteria", "flights"], "same"),
+        # Only the refusals: a redo that succeeds hands the note to an agent
+        # and would start a real one against the throwaway database.
+        (["redo", "hotel"], "both refuse"),
+        (["redo", "nosuch", "anything"], "both refuse"),
         (["--json", "show", "hotel"], "same"),
         (["--json", "criteria", "hotel"], "same"),
     ]
